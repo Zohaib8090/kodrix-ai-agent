@@ -662,6 +662,7 @@ private fun AiChatTab(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
