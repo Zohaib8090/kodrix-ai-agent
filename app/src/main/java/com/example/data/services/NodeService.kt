@@ -26,24 +26,126 @@ class NodeService(private val context: Context) {
     private val tag = "NodeService"
 
     val nodeDir: File get() = File(context.filesDir, "nodejs").apply { mkdirs() }
+    val usrDir: File get() = File(context.filesDir, "usr").apply { mkdirs() }
+    val usrBin: File get() = File(usrDir, "bin").apply { mkdirs() }
+    val usrLib: File get() = File(usrDir, "lib").apply { mkdirs() }
     val projectsDir: File get() = File(context.filesDir, "kodrix-projects").apply { mkdirs() }
-    val nodeBinary: File get() = File(nodeDir, "node")
-    val npmBinary: File get() = File(nodeDir, "npm")
+    val nodeBinary: File get() = File(usrBin, "node")
+    val npmBinary: File get() = File(usrBin, "npm")
+
+    val isRealNodeInstalled: Boolean
+        get() {
+            val localNode = File(usrBin, "node")
+            val termuxNode = File("/data/data/com.termux/files/usr/bin/node")
+            return (localNode.exists() && localNode.canExecute()) || (termuxNode.exists() && termuxNode.canExecute())
+        }
+
+    fun getRealNodeBinary(): File? {
+        val localNode = File(usrBin, "node")
+        if (localNode.exists() && localNode.canExecute()) return localNode
+        val termuxNode = File("/data/data/com.termux/files/usr/bin/node")
+        if (termuxNode.exists() && termuxNode.canExecute()) return termuxNode
+        return null
+    }
 
     private var activeServerJob: Job? = null
     private var serverSocket: ServerSocket? = null
     private var currentRunningProcess: Process? = null
 
     /**
-     * Extracts Node.js binary from assets/node-binary/node to context.filesDir/nodejs/node
-     * and makes it executable (chmod 777).
+     * Downloads and installs the real precompiled Node.js binary for the device's CPU architecture (ARM64 / ARMv7 / x86_64).
+     */
+    suspend fun downloadAndInstallRealNode(onLog: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        try {
+            usrBin.mkdirs()
+            usrLib.mkdirs()
+
+            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+            onLog(">> Detected CPU Architecture: $abi")
+            onLog(">> Connecting to Node.js binary repository...")
+
+            val downloadUrl = when {
+                abi.contains("arm64") || abi.contains("aarch64") ->
+                    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.16-r1%2Bapt-android-7/bootstrap-aarch64.zip"
+                abi.contains("v7") || abi.contains("arm") ->
+                    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.16-r1%2Bapt-android-7/bootstrap-arm.zip"
+                else ->
+                    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.16-r1%2Bapt-android-7/bootstrap-x86_64.zip"
+            }
+
+            onLog(">> Downloading native Node runtime package (~18 MB) ...")
+            val zipFile = File(context.cacheDir, "node_runtime_${System.currentTimeMillis()}.zip")
+
+            val url = java.net.URL(downloadUrl)
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
+            conn.connect()
+
+            if (conn.responseCode in 200..299) {
+                var downloaded = 0L
+                val totalBytes = conn.contentLengthLong
+                conn.inputStream.use { input ->
+                    zipFile.outputStream().use { output ->
+                        val buffer = ByteArray(8192)
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                        }
+                    }
+                }
+
+                onLog("✓ Download complete. Extracting native binaries into /data/data/${context.packageName}/files/usr ...")
+
+                java.util.zip.ZipInputStream(zipFile.inputStream()).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val name = entry.name
+                        if (name.contains("bin/") || name.contains("lib/") || name.contains("etc/")) {
+                            val destFile = File(usrDir, name.substringAfter("usr/").ifEmpty { name })
+                            if (entry.isDirectory) {
+                                destFile.mkdirs()
+                            } else {
+                                destFile.parentFile?.mkdirs()
+                                destFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                destFile.setExecutable(true, false)
+                                destFile.setReadable(true, false)
+                            }
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+
+                zipFile.delete()
+
+                try {
+                    Runtime.getRuntime().exec(arrayOf("chmod", "-R", "755", usrDir.absolutePath)).waitFor()
+                } catch (_: Exception) {}
+
+                onLog("✓ Real Node.js & NPM binaries installed successfully!")
+                return@withContext true
+            } else {
+                onLog("⚠️ Download failed with HTTP status: ${conn.responseCode}")
+                return@withContext false
+            }
+        } catch (e: Exception) {
+            onLog("Install note: ${e.message}")
+            return@withContext false
+        }
+    }
+
+    /**
+     * Sets up Node.js runtime permissions and environment.
      */
     fun setupRealEnv(): Boolean {
         try {
             nodeDir.mkdirs()
+            usrBin.mkdirs()
             projectsDir.mkdirs()
 
-            // 1. Extract node binary from assets
+            // 1. Extract node binary from assets if bundled
             val assetNames = try {
                 context.assets.list("node-binary") ?: emptyArray()
             } catch (e: Exception) {
@@ -56,56 +158,18 @@ class NodeService(private val context: Context) {
                         input.copyTo(output)
                     }
                 }
-            } else {
-                // Fallback: Write executable node runner shell wrapper
-                if (!nodeBinary.exists()) {
-                    nodeBinary.writeText(
-                        """
-                        #!/system/bin/sh
-                        if command -v node >/dev/null 2>&1; then
-                            exec node "$@"
-                        elif [ -x /data/data/com.termux/files/usr/bin/node ]; then
-                            exec /data/data/com.termux/files/usr/bin/node "$@"
-                        else
-                            echo "Kodrix Node.js Runtime (Android)"
-                            exec "$@"
-                        fi
-                        """.trimIndent()
-                    )
-                }
             }
 
-            // Create helper npm executable script
-            if (!npmBinary.exists()) {
-                npmBinary.writeText(
-                    """
-                    #!/system/bin/sh
-                    if command -v npm >/dev/null 2>&1; then
-                        exec npm "$@"
-                    elif [ -x /data/data/com.termux/files/usr/bin/npm ]; then
-                        exec /data/data/com.termux/files/usr/bin/npm "$@"
-                    else
-                        echo "npm v10.0.0 (Kodrix Runtime)"
-                        exec "$@"
-                    fi
-                    """.trimIndent()
-                )
-            }
-
-            // 2. Make executable (chmod 777)
             nodeBinary.setExecutable(true, false)
             nodeBinary.setReadable(true, false)
             npmBinary.setExecutable(true, false)
             npmBinary.setReadable(true, false)
 
             try {
-                Runtime.getRuntime().exec(arrayOf("chmod", "777", nodeBinary.absolutePath)).waitFor()
-                Runtime.getRuntime().exec(arrayOf("chmod", "777", npmBinary.absolutePath)).waitFor()
-            } catch (e: Exception) {
-                Log.w(tag, "chmod warning: ${e.message}")
-            }
+                Runtime.getRuntime().exec(arrayOf("chmod", "755", nodeBinary.absolutePath)).waitFor()
+                Runtime.getRuntime().exec(arrayOf("chmod", "755", npmBinary.absolutePath)).waitFor()
+            } catch (_: Exception) {}
 
-            Log.i(tag, "Real Node.js runtime initialized at: ${nodeBinary.absolutePath}")
             return true
         } catch (e: Exception) {
             Log.e(tag, "Failed to setup real Node environment", e)
@@ -337,10 +401,15 @@ class RealTerminalSession(
     var currentDir: File = File(context.filesDir, "my_projects").apply { mkdirs() },
     private val nodeService: NodeService? = null
 ) {
+    private val embeddedTermux = EmbeddedTermuxManager(context)
+
     private val _outputLines = MutableStateFlow<List<String>>(
         listOf(
             "Kodrix Linux/Termux Environment v2.0",
-            "Built-in Tools: npm, node, git, curl, wget, unzip, sh",
+            "Built-in Tools: bash, sh, npm, node, git, pkg, apt, curl, wget, unzip",
+            if (embeddedTermux.isInstalled) "🟢 Embedded Termux Linux: ACTIVE (${embeddedTermux.getArchitecture()})"
+            else if (nodeService?.isRealNodeInstalled == true) "🟢 Real Native Engine: ACTIVE (ARM64)"
+            else "Type 'setup-termux' or 'setup-node' to initialize full embedded Linux rootfs",
             "Working Dir: ${currentDir.name}",
             "------------------------------------------------"
         )
@@ -367,6 +436,52 @@ class RealTerminalSession(
                 val tokens = trimmed.split("\\s+".toRegex()).filter { it.isNotBlank() }
                 val cmd = tokens.firstOrNull()?.lowercase() ?: ""
 
+                // 1. Check for setup-termux or setup-node installer commands
+                if (cmd == "setup-termux" || cmd == "install-termux") {
+                    appendOutput(">> Initializing Embedded Termux Linux Rootfs (${embeddedTermux.getArchitecture()})...")
+                    val success = embeddedTermux.installBootstrap(
+                        onLog = { appendOutput(it) },
+                        onProgress = { p -> if (p > 0) appendOutput(">> Progress: ${(p * 100).toInt()}%") }
+                    )
+                    if (success) {
+                        appendOutput("✓ Full Embedded Termux Linux environment is ACTIVE!")
+                        appendOutput("You can now run 'pkg install <pkg>', 'bash', 'node', 'npm', 'git', etc.")
+                    } else {
+                        appendOutput("⚠️ Setup failed. Check internet connection and try again.")
+                    }
+                    _isRunning.value = false
+                    onComplete?.invoke(if (success) 0 else 1)
+                    return@launch
+                }
+
+                if (cmd == "setup-node" || cmd == "install-node") {
+                    appendOutput(">> Starting Real Native Node.js Installer...")
+                    val success = nodeService?.downloadAndInstallRealNode { appendOutput(it) } ?: false
+                    if (success) {
+                        appendOutput("✓ Real native Node.js engine installed successfully!")
+                        appendOutput("You can now run real 'node', 'npm install', 'git clone', etc.")
+                    } else {
+                        appendOutput("⚠️ Installation failed. Check internet connection and try again.")
+                    }
+                    _isRunning.value = false
+                    onComplete?.invoke(if (success) 0 else 1)
+                    return@launch
+                }
+
+                // 2. If Embedded Termux or Real Node.js binary is installed, execute real OS process
+                val realNode = nodeService?.getRealNodeBinary()
+                if (embeddedTermux.isInstalled || realNode != null || cmd == "pkg" || cmd == "apt" || cmd == "apt-get" || cmd == "bash" || cmd == "sh" || cmd == "dpkg") {
+                    val exit = embeddedTermux.execute(trimmed, currentDir) { line ->
+                        appendOutput(line)
+                    }
+                    if (exit != 0) {
+                        appendOutput("[Exit code $exit]")
+                    }
+                    _isRunning.value = false
+                    onComplete?.invoke(exit)
+                    return@launch
+                }
+
                 when (cmd) {
                     "clear", "cls" -> {
                         clear()
@@ -376,7 +491,8 @@ class RealTerminalSession(
                     }
 
                     "help" -> {
-                        appendOutput("Kodrix Terminal Built-in Commands:")
+                        appendOutput("Kodrix Terminal Commands:")
+                        appendOutput("  setup-node                - Download & install 100% real native Node.js runtime")
                         appendOutput("  npm install | npm i       - Install project dependencies")
                         appendOutput("  npm run dev | npm start   - Launch live dev server (http://localhost:5173)")
                         appendOutput("  npm -v | node -v          - View Node & NPM versions")
@@ -514,7 +630,6 @@ class RealTerminalSession(
                     }
 
                     else -> {
-                        // Pass to shell process or fallback
                         val nodeDir = File(context.filesDir, "nodejs")
                         val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
                         val newPath = "${nodeDir.absolutePath}:$currentPath:/data/data/com.termux/files/usr/bin"
@@ -529,6 +644,7 @@ class RealTerminalSession(
                         env["TERM"] = "xterm-256color"
 
                         val p = pb.start()
+                        process = p
                         BufferedReader(InputStreamReader(p.inputStream)).use { reader ->
                             var line: String?
                             while (reader.readLine().also { line = it } != null) {
@@ -803,7 +919,7 @@ class RealTerminalSession(
             }
         } else {
             val names = sorted.joinToString("  ") { if (it.isDirectory) "${it.name}/" else it.name }
-            appendOutput(names.ifEmpty { "(empty directory)" })
+            appendOutput(if (names.isBlank()) "(empty directory)" else names)
         }
     }
 

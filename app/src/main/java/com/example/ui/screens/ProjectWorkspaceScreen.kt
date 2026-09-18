@@ -2182,12 +2182,15 @@ private fun TerminalTab(
     }
 
     val quickCommands = listOf(
-        "ls -la",
-        "npm install",
-        "npm run dev",
-        "curl -O",
-        "node -v",
-        "git status"
+        "🚀 Install Full Termux" to "setup-termux",
+        "⚡ Install Node Engine" to "setup-node",
+        "pkg install nodejs" to "pkg install -y nodejs git",
+        "ls -la" to "ls -la",
+        "npm install" to "npm install",
+        "npm run dev" to "npm run dev",
+        "curl -O" to "curl -O ",
+        "node -v" to "node -v",
+        "git status" to "git status"
     )
 
     Column(
@@ -2273,13 +2276,18 @@ private fun TerminalTab(
                 .padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            quickCommands.forEach { cmd ->
+            quickCommands.forEach { (label, cmd) ->
+                val isSetup = cmd == "setup-node"
+                val bgColor = if (isSetup) Color(0xFF1E3A5F) else Color(0xFF1E293B)
+                val textColor = if (isSetup) Color(0xFF38BDF8) else Color(0xFF94A3B8)
+                val borderColor = if (isSetup) Color(0xFF0284C7) else Color(0xFF334155)
+
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF1E293B),
-                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    color = bgColor,
+                    border = BorderStroke(1.dp, borderColor),
                     modifier = Modifier.clickable {
-                        if (cmd == "curl -O") {
+                        if (cmd == "curl -O ") {
                             commandInput = "curl -O "
                         } else {
                             onExecuteCommand(cmd)
@@ -2287,10 +2295,11 @@ private fun TerminalTab(
                     }
                 ) {
                     Text(
-                        text = cmd,
+                        text = label,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                         fontSize = 11.sp,
-                        color = Color(0xFF38BDF8),
+                        fontWeight = if (isSetup) FontWeight.Bold else FontWeight.Normal,
+                        color = textColor,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
