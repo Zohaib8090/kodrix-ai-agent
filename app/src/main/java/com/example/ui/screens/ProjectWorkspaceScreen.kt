@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.local.ProjectChatSession
 import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
 import com.example.data.services.ProjectFileNode
@@ -50,6 +51,9 @@ import com.example.ui.theme.LandingPeachHover
 import com.example.ui.viewmodel.ProjectWorkspaceViewModel
 import com.example.ui.viewmodel.WorkspaceBottomNav
 import com.example.ui.viewmodel.WorkspaceChatMessage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -372,6 +376,8 @@ fun ProjectWorkspaceScreen(
                     WorkspaceBottomNav.AI_CHAT -> {
                         AiChatTab(
                             messages = state.chatMessages,
+                            chatSessions = state.chatSessions,
+                            activeChatSession = state.activeChatSession,
                             isAiRefining = state.isAiRefining,
                             isGenerating = state.isGenerating,
                             isOnboarding = state.isOnboarding,
@@ -392,6 +398,18 @@ fun ProjectWorkspaceScreen(
                             onRunInTerminal = { command ->
                                 viewModel.executeTerminalCommand(command)
                                 viewModel.selectTab(WorkspaceBottomNav.TERMINAL)
+                            },
+                            onCreateNewChat = { title ->
+                                viewModel.createNewChatSession(title)
+                            },
+                            onSwitchChatSession = { session ->
+                                viewModel.switchChatSession(session)
+                            },
+                            onRenameChatSession = { session, newTitle ->
+                                viewModel.renameChatSession(session, newTitle)
+                            },
+                            onDeleteChatSession = { session ->
+                                viewModel.deleteChatSession(session)
                             }
                         )
                     }
@@ -451,9 +469,12 @@ fun ProjectWorkspaceScreen(
 /**
  * Tab 1: AI Chat Interface
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AiChatTab(
     messages: List<WorkspaceChatMessage>,
+    chatSessions: List<ProjectChatSession> = emptyList(),
+    activeChatSession: ProjectChatSession? = null,
     isAiRefining: Boolean,
     isGenerating: Boolean = false,
     isOnboarding: Boolean = false,
@@ -463,11 +484,20 @@ private fun AiChatTab(
     onRetryPrompt: (String) -> Unit,
     onSendOnboardingReply: (String) -> Unit = {},
     onStopResponse: () -> Unit = {},
-    onRunInTerminal: (String) -> Unit = {}
+    onRunInTerminal: (String) -> Unit = {},
+    onCreateNewChat: (String?) -> Unit = {},
+    onSwitchChatSession: (ProjectChatSession) -> Unit = {},
+    onRenameChatSession: (ProjectChatSession, String) -> Unit = { _, _ -> },
+    onDeleteChatSession: (ProjectChatSession) -> Unit = {}
 ) {
     val context = LocalContext.current
     var promptInput by remember { mutableStateOf("") }
     var selectedPromptActionMessage by remember { mutableStateOf<WorkspaceChatMessage?>(null) }
+    var showSessionsSheet by remember { mutableStateOf(false) }
+    var sessionToRename by remember { mutableStateOf<ProjectChatSession?>(null) }
+    var sessionToDelete by remember { mutableStateOf<ProjectChatSession?>(null) }
+    var showNewChatDialog by remember { mutableStateOf(false) }
+    var newChatTitleInput by remember { mutableStateOf("") }
 
     fun copyTextToClipboard(label: String, text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -483,6 +513,93 @@ private fun AiChatTab(
     )
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Multi-Chat Sessions Header Bar
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Active Chat Session Pill
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showSessionsSheet = true }
+                        .testTag("chat_session_selector")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = activeChatSession?.title ?: "Main Chat",
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 150.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "Switch Session",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // New Chat Button
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = LandingPeach,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showNewChatDialog = true }
+                        .testTag("btn_new_chat")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "New Chat",
+                            tint = Color(0xFF1E1E1E),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "New Chat",
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = Color(0xFF1E1E1E)
+                        )
+                    }
+                }
+            }
+        }
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -1008,6 +1125,347 @@ private fun AiChatTab(
                 }
             }
         )
+    }
+
+    // New Chat Dialog
+    if (showNewChatDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showNewChatDialog = false
+                newChatTitleInput = ""
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AddComment,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "New Chat Thread",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Create a separate chat thread for a new feature, bug fix, or question.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newChatTitleInput,
+                        onValueChange = { newChatTitleInput = it },
+                        label = { Text("Chat Title (optional)") },
+                        placeholder = { Text("e.g. Navigation Refactor") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onCreateNewChat(newChatTitleInput.trim().ifBlank { null })
+                        showNewChatDialog = false
+                        newChatTitleInput = ""
+                    }
+                ) {
+                    Text("Create Chat")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showNewChatDialog = false
+                        newChatTitleInput = ""
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Rename Chat Dialog
+    sessionToRename?.let { session ->
+        var renameInput by remember { mutableStateOf(session.title) }
+        AlertDialog(
+            onDismissRequest = { sessionToRename = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Rename Chat",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                OutlinedTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    label = { Text("Chat Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (renameInput.isNotBlank()) {
+                            onRenameChatSession(session, renameInput.trim())
+                        }
+                        sessionToRename = null
+                    },
+                    enabled = renameInput.isNotBlank()
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sessionToRename = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Delete Chat Confirmation Dialog
+    sessionToDelete?.let { session ->
+        AlertDialog(
+            onDismissRequest = { sessionToDelete = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Delete Chat Thread?",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete '${session.title}' and all its messages? This action cannot be undone.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteChatSession(session)
+                        sessionToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.onError)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sessionToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // All Chat Sessions Bottom Sheet
+    if (showSessionsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSessionsSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .navigationBarsPadding()
+            ) {
+                // Sheet Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "Project Chat Threads",
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${chatSessions.size} conversation(s) in this project",
+                            fontFamily = InterFontFamily,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // + New Chat button inside sheet
+                    FilledTonalButton(
+                        onClick = {
+                            showSessionsSheet = false
+                            showNewChatDialog = true
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("New Chat", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // List of Sessions
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(chatSessions, key = { it.id }) { session ->
+                        val isActive = session.id == activeChatSession?.id
+                        val formattedDate = try {
+                            val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                            sdf.format(Date(session.updatedAt))
+                        } catch (_: Exception) { "" }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            border = BorderStroke(
+                                1.5.dp,
+                                if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onSwitchChatSession(session)
+                                    showSessionsSheet = false
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isActive) Icons.Default.ChatBubble else Icons.Default.ChatBubbleOutline,
+                                        contentDescription = null,
+                                        tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = session.title,
+                                                fontFamily = InterFontFamily,
+                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (isActive) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                ) {
+                                                    Text(
+                                                        text = "ACTIVE",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onPrimary,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (formattedDate.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "Last active $formattedDate",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Rename Action
+                                    IconButton(
+                                        onClick = {
+                                            sessionToRename = session
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Rename",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    // Delete Action
+                                    IconButton(
+                                        onClick = {
+                                            sessionToDelete = session
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Delete",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
     }
 }
 

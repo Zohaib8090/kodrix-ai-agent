@@ -5,9 +5,14 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [BuildRecord::class], version = 1, exportSchema = false)
+@Database(
+    entities = [BuildRecord::class, ProjectChatSession::class, ProjectChatMessage::class],
+    version = 2,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun buildRecordDao(): BuildRecordDao
+    abstract fun projectChatDao(): ProjectChatDao
 
     companion object {
         @Volatile

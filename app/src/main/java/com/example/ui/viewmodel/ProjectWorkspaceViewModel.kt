@@ -10,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.local.BuildRecord
 import com.example.data.local.PreferenceStorage
+import com.example.data.local.ProjectChatMessage
+import com.example.data.local.ProjectChatSession
 import com.example.data.model.AppContext
 import com.example.data.model.CodeArtifact
 import com.example.data.model.PlatformType
@@ -59,6 +61,8 @@ data class ProjectWorkspaceUiState(
     val previewUrl: String = "http://localhost:5173",
     val previewHtml: String? = null,
     val previewBaseUrl: String? = null,
+    val chatSessions: List<ProjectChatSession> = emptyList(),
+    val activeChatSession: ProjectChatSession? = null,
     val chatMessages: List<WorkspaceChatMessage> = emptyList(),
     val isAiRefining: Boolean = false,
     val notification: String? = null,
@@ -84,6 +88,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
     private val projectRepo = ProjectRepository(application)
     private val nodeService = NodeService(application)
     private var activeAiJob: Job? = null
+    private var chatSessionsJob: Job? = null
+    private var chatMessagesJob: Job? = null
     private var terminalSession: com.example.data.services.RealTerminalSession? = null
 
     private val _state = MutableStateFlow(ProjectWorkspaceUiState())
@@ -135,8 +141,138 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         terminalSession?.clear()
     }
 
+    private fun observeMessagesForSession(sessionId: String) {
+        chatMessagesJob?.cancel()
+        chatMessagesJob = viewModelScope.launch {
+            db.projectChatDao().getMessagesForSession(sessionId).collect { msgList ->
+                val uiMsgs = msgList.map {
+                    WorkspaceChatMessage(
+                        id = it.id,
+                        sender = it.sender,
+                        message = it.message,
+                        timestamp = it.timestamp
+                    )
+                }
+                _state.value = _state.value.copy(chatMessages = uiMsgs)
+            }
+        }
+    }
+
+    private suspend fun persistMessage(sender: String, message: String): WorkspaceChatMessage {
+        val currentRecord = _state.value.record
+        val projectId = currentRecord?.id ?: ""
+        var activeSession = _state.value.activeChatSession
+        if (activeSession == null && projectId.isNotBlank()) {
+            val fallback = ProjectChatSession(
+                id = UUID.randomUUID().toString(),
+                projectId = projectId,
+                title = "Main Chat",
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            db.projectChatDao().insertSession(fallback)
+            activeSession = fallback
+            _state.value = _state.value.copy(activeChatSession = fallback)
+            observeMessagesForSession(fallback.id)
+        }
+
+        val sessionId = activeSession?.id ?: UUID.randomUUID().toString()
+        val entity = ProjectChatMessage(
+            id = UUID.randomUUID().toString(),
+            sessionId = sessionId,
+            projectId = projectId,
+            sender = sender,
+            message = message,
+            timestamp = System.currentTimeMillis()
+        )
+        db.projectChatDao().insertMessage(entity)
+        if (activeSession != null) {
+            val updated = activeSession.copy(updatedAt = System.currentTimeMillis())
+            db.projectChatDao().updateSession(updated)
+        }
+        return WorkspaceChatMessage(entity.id, entity.sender, entity.message, entity.timestamp)
+    }
+
+    fun createNewChatSession(title: String? = null) {
+        val currentRecord = _state.value.record ?: return
+        viewModelScope.launch {
+            val count = db.projectChatDao().getDirectSessionsForProject(currentRecord.id).size
+            val sessionTitle = title?.trim()?.ifBlank { null } ?: "Chat ${count + 1}"
+            val newSession = ProjectChatSession(
+                id = UUID.randomUUID().toString(),
+                projectId = currentRecord.id,
+                title = sessionTitle,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            db.projectChatDao().insertSession(newSession)
+            _state.value = _state.value.copy(
+                activeChatSession = newSession,
+                notification = "Created new chat: $sessionTitle"
+            )
+            observeMessagesForSession(newSession.id)
+        }
+    }
+
+    fun switchChatSession(session: ProjectChatSession) {
+        if (_state.value.activeChatSession?.id == session.id) return
+        _state.value = _state.value.copy(
+            activeChatSession = session,
+            notification = "Switched to ${session.title}"
+        )
+        observeMessagesForSession(session.id)
+    }
+
+    fun renameChatSession(session: ProjectChatSession, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            val updated = session.copy(title = trimmed, updatedAt = System.currentTimeMillis())
+            db.projectChatDao().updateSession(updated)
+            if (_state.value.activeChatSession?.id == session.id) {
+                _state.value = _state.value.copy(activeChatSession = updated)
+            }
+            _state.value = _state.value.copy(notification = "Renamed to $trimmed")
+        }
+    }
+
+    fun deleteChatSession(session: ProjectChatSession) {
+        val currentRecord = _state.value.record ?: return
+        viewModelScope.launch {
+            db.projectChatDao().deleteMessagesForSession(session.id)
+            db.projectChatDao().deleteSessionById(session.id)
+
+            val remaining = db.projectChatDao().getDirectSessionsForProject(currentRecord.id)
+            if (remaining.isEmpty()) {
+                val newMain = ProjectChatSession(
+                    id = UUID.randomUUID().toString(),
+                    projectId = currentRecord.id,
+                    title = "Main Chat",
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                )
+                db.projectChatDao().insertSession(newMain)
+                _state.value = _state.value.copy(
+                    activeChatSession = newMain,
+                    notification = "Chat deleted"
+                )
+                observeMessagesForSession(newMain.id)
+            } else {
+                val nextActive = remaining.first()
+                _state.value = _state.value.copy(
+                    activeChatSession = nextActive,
+                    notification = "Chat deleted"
+                )
+                observeMessagesForSession(nextActive.id)
+            }
+        }
+    }
+
     fun loadProject(projectId: String) {
         activeAiJob?.cancel()
+        chatSessionsJob?.cancel()
+        chatMessagesJob?.cancel()
+
         activeAiJob = viewModelScope.launch {
             val record = db.buildRecordDao().getRecordDirect(projectId)
             if (record == null) {
@@ -150,12 +286,32 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             val providerConfig = aiRepo.getProviderConfig(record.codegenProviderId)
             val providerName = providerConfig?.name ?: record.codegenProviderId.replaceFirstChar { it.uppercase() }
 
-            val initialMessages = listOf(
-                WorkspaceChatMessage(
-                    sender = "USER",
-                    message = record.prompt
+            // Ensure at least one chat session exists in Room
+            val directSessions = db.projectChatDao().getDirectSessionsForProject(projectId)
+            val currentActiveSession: ProjectChatSession = if (directSessions.isEmpty()) {
+                val initialSession = ProjectChatSession(
+                    id = UUID.randomUUID().toString(),
+                    projectId = projectId,
+                    title = "Main Chat",
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
                 )
-            )
+                db.projectChatDao().insertSession(initialSession)
+                if (record.prompt.isNotBlank()) {
+                    val userInitMsg = ProjectChatMessage(
+                        id = UUID.randomUUID().toString(),
+                        sessionId = initialSession.id,
+                        projectId = projectId,
+                        sender = "USER",
+                        message = record.prompt,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    db.projectChatDao().insertMessage(userInitMsg)
+                }
+                initialSession
+            } else {
+                directSessions.first()
+            }
 
             _state.value = _state.value.copy(
                 record = record,
@@ -164,9 +320,24 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 activeProviderId = record.codegenProviderId,
                 activeProviderName = providerName,
                 availableProviders = allProviders,
-                chatMessages = initialMessages,
+                activeChatSession = currentActiveSession,
                 mainFolderPath = "my_projects/${record.appName}"
             )
+
+            // Start observing chat sessions flow for this project
+            chatSessionsJob = viewModelScope.launch {
+                db.projectChatDao().getSessionsForProject(projectId).collect { sessionList ->
+                    val curActive = _state.value.activeChatSession
+                    val validActive = sessionList.firstOrNull { it.id == curActive?.id } ?: sessionList.firstOrNull()
+                    _state.value = _state.value.copy(
+                        chatSessions = sessionList,
+                        activeChatSession = validActive
+                    )
+                }
+            }
+
+            // Start observing messages for the active session
+            observeMessagesForSession(currentActiveSession.id)
 
             val projectDir = projectRepo.getProjectDir(record.appName)
             terminalSession?.destroy()
@@ -241,11 +412,10 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
      * Instead of immediately building, Kodrix asks smart clarifying questions.
      */
     private suspend fun startOnboarding(record: BuildRecord) {
-        val userOpeningMsg = WorkspaceChatMessage(sender = "USER", message = record.prompt)
+        val userOpeningMsg = persistMessage("USER", record.prompt)
         _state.value = _state.value.copy(
             isOnboarding = true,
             isOnboardingThinking = true,
-            chatMessages = listOf(userOpeningMsg),
             onboardingConversation = listOf(userOpeningMsg),
             activeTab = WorkspaceBottomNav.AI_CHAT,
             statusText = "Kodrix is analyzing your request..."
@@ -284,10 +454,9 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             if (aiText.contains("READY_TO_BUILD", ignoreCase = true)) {
                 // AI already has enough context — build immediately
                 val cleanText = aiText.replace("READY_TO_BUILD", "").trim()
-                val aiMsg = if (cleanText.isNotBlank()) WorkspaceChatMessage(sender = "AI", message = cleanText) else null
+                val aiMsg = if (cleanText.isNotBlank()) persistMessage("AI", cleanText) else null
                 val allMsgs = if (aiMsg != null) listOf(userOpeningMsg, aiMsg) else listOf(userOpeningMsg)
                 _state.value = _state.value.copy(
-                    chatMessages = allMsgs,
                     onboardingConversation = allMsgs,
                     isOnboardingThinking = false
                 )
@@ -295,10 +464,9 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 val projectDir = projectRepo.getProjectDir(record.appName)
                 generateProjectCode(record.copy(prompt = enriched), projectDir)
             } else {
-                val aiMsg = WorkspaceChatMessage(sender = "AI", message = aiText)
+                val aiMsg = persistMessage("AI", aiText)
                 val conversation = listOf(userOpeningMsg, aiMsg)
                 _state.value = _state.value.copy(
-                    chatMessages = conversation,
                     onboardingConversation = conversation,
                     isOnboarding = true,
                     isOnboardingThinking = false,
@@ -307,13 +475,12 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             }
         } else {
             val errorDetails = firstQuestion.exceptionOrNull()?.message ?: "Unable to connect to AI provider"
-            val aiMsg = WorkspaceChatMessage(
-                sender = "AI",
-                message = "⚠️ Could not connect to ${_state.value.activeProviderName}:\n\n$errorDetails\n\nPlease configure your API key for ${_state.value.activeProviderName} in Settings (top-right gear icon), then reply here to continue."
+            val aiMsg = persistMessage(
+                "AI",
+                "⚠️ Could not connect to ${_state.value.activeProviderName}:\n\n$errorDetails\n\nPlease configure your API key for ${_state.value.activeProviderName} in Settings (top-right gear icon), then reply here to continue."
             )
             val conversation = listOf(userOpeningMsg, aiMsg)
             _state.value = _state.value.copy(
-                chatMessages = conversation,
                 onboardingConversation = conversation,
                 isOnboarding = true,
                 isOnboardingThinking = false,
@@ -331,17 +498,16 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         if (trimmed.isBlank()) return
         val record = _state.value.record ?: return
 
-        val userMsg = WorkspaceChatMessage(sender = "USER", message = trimmed)
-        val updatedConversation = _state.value.onboardingConversation + userMsg
-
-        _state.value = _state.value.copy(
-            chatMessages = _state.value.chatMessages + userMsg,
-            onboardingConversation = updatedConversation,
-            isOnboardingThinking = true
-        )
-
         activeAiJob?.cancel()
         activeAiJob = viewModelScope.launch {
+            val userMsg = persistMessage("USER", trimmed)
+            val updatedConversation = _state.value.onboardingConversation + userMsg
+
+            _state.value = _state.value.copy(
+                onboardingConversation = updatedConversation,
+                isOnboardingThinking = true
+            )
+
             // Build conversation history for AI context
             val historyText = updatedConversation.joinToString("\n") {
                 "${if (it.sender == "USER") "User" else "Kodrix"}: ${it.message}"
@@ -374,11 +540,10 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 val readyToBuild = rawText.contains("READY_TO_BUILD", ignoreCase = true)
                 val cleanText = rawText.replace("READY_TO_BUILD", "").trim()
 
-                val aiMsg = WorkspaceChatMessage(sender = "AI", message = cleanText)
+                val aiMsg = persistMessage("AI", cleanText)
                 val fullConversation = updatedConversation + aiMsg
 
                 _state.value = _state.value.copy(
-                    chatMessages = _state.value.chatMessages + aiMsg,
                     onboardingConversation = fullConversation,
                     isOnboardingThinking = false
                 )
@@ -392,12 +557,11 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 }
             } else {
                 // AI error — keep onboarding going, show error
-                val errorMsg = WorkspaceChatMessage(
-                    sender = "AI",
-                    message = "Sorry, I had trouble reaching the AI. Please check your API key in Settings, then try replying again."
+                val errorMsg = persistMessage(
+                    "AI",
+                    "Sorry, I had trouble reaching the AI. Please check your API key in Settings, then try replying again."
                 )
                 _state.value = _state.value.copy(
-                    chatMessages = _state.value.chatMessages + errorMsg,
                     isOnboardingThinking = false
                 )
             }
@@ -467,16 +631,15 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             )
             db.buildRecordDao().update(failedRecord)
 
-            val errorMsg = WorkspaceChatMessage(
-                sender = "AI",
-                message = "❌ Code generation failed:\n\n$errorReason\n\nPlease check your API key in Settings, verify your provider connection, and try again."
+            persistMessage(
+                "AI",
+                "❌ Code generation failed:\n\n$errorReason\n\nPlease check your API key in Settings, verify your provider connection, and try again."
             )
 
             _state.value = _state.value.copy(
                 record = failedRecord,
                 isGenerating = false,
                 statusText = "Generation failed: $errorReason",
-                chatMessages = _state.value.chatMessages + errorMsg,
                 activeTab = WorkspaceBottomNav.AI_CHAT,
                 notification = "Build failed: $errorReason"
             )
@@ -518,9 +681,9 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             )
         } catch (_: Exception) {}
 
-        val completionMsg = WorkspaceChatMessage(
-            sender = "AI",
-            message = "✨ I've built your application '${record.appName}'!\n\n" +
+        persistMessage(
+            "AI",
+            "✨ I've built your application '${record.appName}'!\n\n" +
                     "Generated ${freshFiles.size} project file(s) in 'my_projects/${record.appName}/':\n" +
                     freshFiles.joinToString("\n") { "• ${it.path}" } +
                     "\n\nUse the bottom navigation to view the live Preview, inspect Code files in the directory, or chat with me for modifications."
@@ -537,7 +700,6 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             previewHtml = htmlContent,
             previewBaseUrl = "file://${savedDir.absolutePath}/",
             previewUrl = "http://localhost:5173",
-            chatMessages = _state.value.chatMessages + completionMsg,
             activeTab = if (isWeb) WorkspaceBottomNav.PREVIEW else WorkspaceBottomNav.CODE,
             notification = "Generated ${freshFiles.size} project files!"
         )
@@ -676,9 +838,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
         activeAiJob?.cancel()
         activeAiJob = viewModelScope.launch {
-            val userMsg = WorkspaceChatMessage(sender = "USER", message = userInstruction)
+            persistMessage("USER", userInstruction)
             _state.value = _state.value.copy(
-                chatMessages = _state.value.chatMessages + userMsg,
                 isAiRefining = true
             )
 
@@ -731,12 +892,11 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                         ?: updatedFiles.firstOrNull()
 
                     val explanationPrefix = if (conversationalText.isNotBlank()) "$conversationalText\n\n" else ""
-                    val aiMsg = WorkspaceChatMessage(
-                        sender = "AI",
-                        message = "${explanationPrefix}✨ Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
-                                parsedFiles.joinToString("\n") { "• ${it.path}" } +
-                                "\n\nCheck the Preview tab to see the live updates, or the Code tab to inspect the source code."
-                    )
+                    val completionMsg = "${explanationPrefix}✨ Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
+                            parsedFiles.joinToString("\n") { "• ${it.path}" } +
+                            "\n\nCheck the Preview tab to see the live updates, or the Code tab to inspect the source code."
+                    
+                    persistMessage("AI", completionMsg)
 
                     try {
                         NotificationHelper.notifyAiRefineCompleted(
@@ -749,7 +909,6 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
                     _state.value = _state.value.copy(
                         isAiRefining = false,
-                        chatMessages = _state.value.chatMessages + aiMsg,
                         files = updatedFiles,
                         directoryTree = tree,
                         selectedFile = reSelected,
@@ -761,24 +920,18 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 } else {
                     // Conversational response without file updates
                     val cleanReply = conversationalText.ifBlank { rawAiResponse.trim() }
-                    val aiMsg = WorkspaceChatMessage(
-                        sender = "AI",
-                        message = cleanReply.ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
-                    )
+                    val replyText = cleanReply.ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
+                    persistMessage("AI", replyText)
                     _state.value = _state.value.copy(
-                        isAiRefining = false,
-                        chatMessages = _state.value.chatMessages + aiMsg
+                        isAiRefining = false
                     )
                 }
             } else {
                 val errorMsg = chatResult.exceptionOrNull()?.localizedMessage ?: "Unknown AI error"
-                val aiMsg = WorkspaceChatMessage(
-                    sender = "AI",
-                    message = "Could not contact AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
-                )
+                val errText = "Could not contact AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
+                persistMessage("AI", errText)
                 _state.value = _state.value.copy(
                     isAiRefining = false,
-                    chatMessages = _state.value.chatMessages + aiMsg,
                     notification = "AI request failed."
                 )
             }
