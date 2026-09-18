@@ -109,6 +109,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -664,11 +665,15 @@ fun SettingsScreen(
                                 leadingIcon = {
                                     Icon(imageVector = Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 },
+                                textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
                                 singleLine = true,
                                 shape = RoundedCornerShape(10.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    cursorColor = MaterialTheme.colorScheme.primary
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -893,11 +898,15 @@ fun SettingsScreen(
                                 value = state.devServerPort.toString(),
                                 onValueChange = { it.toIntOrNull()?.let { p -> viewModel.setDevServerPort(p) } },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
                                 singleLine = true,
                                 shape = RoundedCornerShape(10.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    cursorColor = MaterialTheme.colorScheme.primary
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1096,6 +1105,13 @@ fun SettingsScreen(
                                 readOnly = true,
                                 label = { Text("Provider Type") },
                                 trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                                textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             )
                             androidx.compose.material3.Surface(
@@ -1117,22 +1133,62 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = name, onValueChange = { name = it },
                             label = { Text("Provider Name") }, placeholder = { Text("e.g. Together AI") },
+                            textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                cursorColor = MaterialTheme.colorScheme.primary
+                            ),
                             singleLine = true, modifier = Modifier.fillMaxWidth()
                         )
                         OutlinedTextField(
                             value = baseUrl, onValueChange = { baseUrl = it },
                             label = { Text("Base URL") }, placeholder = { Text("https://api.together.xyz/v1") },
+                            textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                cursorColor = MaterialTheme.colorScheme.primary
+                            ),
                             singleLine = true, modifier = Modifier.fillMaxWidth()
                         )
                         OutlinedTextField(
                             value = apiKey, onValueChange = { apiKey = it },
                             label = { Text("API Key") }, singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
+                            textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                cursorColor = MaterialTheme.colorScheme.primary
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         )
                         OutlinedTextField(
                             value = modelName, onValueChange = { modelName = it },
-                            label = { Text("Model Name") }, placeholder = { Text("e.g. meta-llama/Llama-3-70b") },
+                            label = { Text("Model Name") }, placeholder = { Text("e.g. meta-llama/Llama-3.3-70b") },
+                            textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                cursorColor = MaterialTheme.colorScheme.primary
+                            ),
                             singleLine = true, modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -1152,7 +1208,7 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "{ \"name\": \"MyProvider\", \"baseUrl\": \"https://api.x.ai/v1\", \"apiKey\": \"sk-...\", \"defaultModel\": \"grok-beta\" }",
+                                text = "{ \"name\": \"MyProvider\", \"baseUrl\": \"https://api.x.ai/v1\", \"apiKey\": \"sk-...\", \"defaultModel\": \"grok-2\" }",
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1166,9 +1222,13 @@ fun SettingsScreen(
                             placeholder = { Text("Paste JSON here...") },
                             minLines = 4,
                             maxLines = 8,
+                            textStyle = TextStyle(fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
                             colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                                 focusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+                                unfocusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                                cursorColor = MaterialTheme.colorScheme.primary
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -1865,6 +1925,16 @@ private fun ProviderManagementCard(
                             },
                             label = { Text("Base URL", fontSize = 11.sp) },
                             singleLine = true,
+                            textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                cursorColor = MaterialTheme.colorScheme.primary
+                            ),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -1890,6 +1960,16 @@ private fun ProviderManagementCard(
                         },
                         visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                         singleLine = true,
+                        textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary,
+                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth().testTag("apikey_${provider.id}")
                     )

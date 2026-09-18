@@ -270,14 +270,14 @@ class PreferenceStorage(context: Context) {
 
     fun getDefaultModelsForProvider(providerId: String): List<String> {
         return when (providerId.lowercase()) {
-            "gemini" -> listOf("gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro")
-            "openai" -> listOf("gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo")
-            "anthropic", "claude" -> listOf("claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229")
-            "groq" -> listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
-            "deepseek" -> listOf("deepseek-chat", "deepseek-coder")
-            "openrouter" -> listOf("anthropic/claude-3.5-sonnet", "openai/gpt-4o", "meta-llama/llama-3.3-70b-instruct")
-            "local_tunnel" -> listOf("llama3:latest", "codellama:latest", "qwen2.5-coder:latest")
-            else -> listOf("deepseek-chat", "gpt-4o", "gemini-2.5-flash")
+            "gemini" -> listOf("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro")
+            "openai" -> listOf("gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "gpt-4.5-preview")
+            "anthropic", "claude" -> listOf("claude-3-7-sonnet", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229")
+            "groq" -> listOf("llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
+            "deepseek" -> listOf("deepseek-chat", "deepseek-reasoner", "deepseek-v3")
+            "openrouter" -> listOf("anthropic/claude-3.7-sonnet", "openai/gpt-4o", "deepseek/deepseek-r1", "meta-llama/llama-3.3-70b-instruct")
+            "local_tunnel", "ollama" -> listOf("qwen2.5-coder:latest", "deepseek-r1:latest", "llama3.3:latest")
+            else -> listOf("deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "gpt-4o", "gemini-2.5-flash")
         }
     }
 
