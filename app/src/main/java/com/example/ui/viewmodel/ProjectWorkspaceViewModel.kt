@@ -113,8 +113,9 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
             val projectDir = projectRepo.getProjectDir(record.appName)
             val existingFiles = projectRepo.readProjectFiles(projectDir)
+            val needsGeneration = existingFiles.isEmpty() || record.status.equals("InProgress", ignoreCase = true)
 
-            if (existingFiles.isEmpty()) {
+            if (needsGeneration) {
                 // Perform real AI code generation on device using the configured AI key
                 generateProjectCode(record, projectDir)
             } else {
@@ -144,6 +145,20 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                     activeTab = if (record.platform.equals("WEB", ignoreCase = true)) WorkspaceBottomNav.PREVIEW else WorkspaceBottomNav.CODE
                 )
             }
+        }
+    }
+
+    fun retryPrompt(promptText: String) {
+        val trimmed = promptText.trim()
+        if (trimmed.isBlank()) return
+        val currentRecord = _state.value.record
+        if (currentRecord != null && _state.value.files.isEmpty()) {
+            viewModelScope.launch {
+                val projectDir = projectRepo.getProjectDir(currentRecord.appName)
+                generateProjectCode(currentRecord.copy(prompt = trimmed), projectDir)
+            }
+        } else {
+            refineWithAi(trimmed)
         }
     }
 

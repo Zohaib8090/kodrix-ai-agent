@@ -8,6 +8,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -364,6 +366,9 @@ fun ProjectWorkspaceScreen(
                             activeProvider = state.activeProviderName,
                             onSendMessage = { instruction ->
                                 viewModel.refineWithAi(instruction)
+                            },
+                            onRetryPrompt = { prompt ->
+                                viewModel.retryPrompt(prompt)
                             }
                         )
                     }
@@ -414,9 +419,18 @@ private fun AiChatTab(
     messages: List<WorkspaceChatMessage>,
     isAiRefining: Boolean,
     activeProvider: String,
-    onSendMessage: (String) -> Unit
+    onSendMessage: (String) -> Unit,
+    onRetryPrompt: (String) -> Unit
 ) {
+    val context = LocalContext.current
     var promptInput by remember { mutableStateOf("") }
+    var selectedPromptActionMessage by remember { mutableStateOf<WorkspaceChatMessage?>(null) }
+
+    fun copyTextToClipboard(label: String, text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        Toast.makeText(context, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
+    }
 
     val promptSuggestions = listOf(
         "✨ Add a dark mode toggle",
@@ -443,26 +457,58 @@ private fun AiChatTab(
                         shape = RoundedCornerShape(16.dp),
                         color = if (isUser) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.widthIn(max = 320.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = if (isUser) Icons.Default.Person else Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isUser) "You" else activeProvider,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-                                    else MaterialTheme.colorScheme.primary
+                        modifier = Modifier
+                            .widthIn(max = 340.dp)
+                            .pointerInput(msg.id) {
+                                detectTapGestures(
+                                    onLongPress = {
+                                        selectedPromptActionMessage = msg
+                                    }
                                 )
                             }
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            // Header: Icon + Sender Name + Quick Actions
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (isUser) Icons.Default.Person else Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isUser) "You" else activeProvider,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                        else MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                // Quick Menu / Hold indicator
+                                IconButton(
+                                    onClick = { selectedPromptActionMessage = msg },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Options",
+                                        tint = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
                             Spacer(modifier = Modifier.height(4.dp))
+
+                            // Message Content
                             Text(
                                 text = msg.message,
                                 fontFamily = InterFontFamily,
@@ -471,6 +517,142 @@ private fun AiChatTab(
                                 color = if (isUser) MaterialTheme.colorScheme.onPrimary
                                 else MaterialTheme.colorScheme.onSurface
                             )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Inline Interactive Action Buttons for Instant Access
+                            if (isUser) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // 1. Copy Prompt Button
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f),
+                                        modifier = Modifier
+                                            .clickable { copyTextToClipboard("Prompt", msg.message) }
+                                            .padding(2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Copy Prompt",
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "Copy",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    // 2. Edit Prompt Button
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f),
+                                        modifier = Modifier
+                                            .clickable {
+                                                promptInput = msg.message
+                                                Toast.makeText(context, "Loaded prompt to edit box", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Edit Prompt",
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "Edit",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    // 3. Retry Prompt Button
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.25f),
+                                        modifier = Modifier
+                                            .clickable { onRetryPrompt(msg.message) }
+                                            .padding(2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Retry Prompt",
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "Retry",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                // AI Message: Copy Output individually
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                        modifier = Modifier
+                                            .clickable { copyTextToClipboard("AI Output", msg.message) }
+                                            .padding(2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Copy Output",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Copy Output",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -612,6 +794,115 @@ private fun AiChatTab(
                 }
             }
         }
+    }
+
+    // Modal Action Sheet for Selected Prompt (on hold / tap options)
+    selectedPromptActionMessage?.let { selectedMsg ->
+        val isUserMsg = selectedMsg.sender == "USER"
+        AlertDialog(
+            onDismissRequest = { selectedPromptActionMessage = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isUserMsg) Icons.Default.Person else Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isUserMsg) "User Prompt Options" else "AI Output Options",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = selectedMsg.message,
+                            fontFamily = InterFontFamily,
+                            fontSize = 12.sp,
+                            maxLines = 6,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (isUserMsg) {
+                        // Option 1: Copy Prompt
+                        OutlinedButton(
+                            onClick = {
+                                copyTextToClipboard("User Prompt", selectedMsg.message)
+                                selectedPromptActionMessage = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Copy Prompt")
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Option 2: Edit Prompt
+                        OutlinedButton(
+                            onClick = {
+                                promptInput = selectedMsg.message
+                                selectedPromptActionMessage = null
+                                Toast.makeText(context, "Prompt loaded into edit box", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Edit Prompt")
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Option 3: Retry Prompt
+                        Button(
+                            onClick = {
+                                selectedPromptActionMessage = null
+                                onRetryPrompt(selectedMsg.message)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Retry Prompt")
+                        }
+                    } else {
+                        // AI Output Copy
+                        Button(
+                            onClick = {
+                                copyTextToClipboard("AI Output", selectedMsg.message)
+                                selectedPromptActionMessage = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Copy Complete Output")
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedPromptActionMessage = null }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

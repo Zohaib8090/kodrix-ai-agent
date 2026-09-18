@@ -286,6 +286,7 @@ fun DashboardScreen(
                         onOpenOptions = { filePicker.launch("*/*") },
                         onSubmit = {
                             if (promptText.isNotBlank() && !state.isLaunchingBuild) {
+                                viewModel.onPromptChanged(promptText)
                                 viewModel.startBuild(onNavigateToTracker)
                             }
                         },
