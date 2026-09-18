@@ -851,8 +851,17 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 The project currently has these source files:
                 $existingSummary
 
+                EMBEDDED LINUX / TERMUX TERMINAL ACCESS:
+                You have full access to execute real terminal commands in the embedded Termux Linux environment (npm, node, pkg, apt, git, curl, wget, python, bash, sh).
+                To execute terminal commands, output:
+                COMMAND: your_command_here
+                For example:
+                COMMAND: npm install axios
+                COMMAND: pkg install -y python git
+                COMMAND: curl -O https://example.com/asset.png
+
                 CRITICAL INSTRUCTIONS:
-                1. If the user is greeting (e.g. 'hi', 'hello', 'hey'), asking a general question, asking for project guidance, or having a conversation without requesting code edits:
+                1. If the user is greeting (e.g. 'hi', 'hello', 'hey'), asking a general question, asking for project guidance, or having a conversation without requesting code edits or commands:
                    Respond conversationally, politely, and helpfully. DO NOT generate empty code files or template files.
                 
                 2. If the user is requesting modifications, bug fixes, design adjustments, or new features:
@@ -863,6 +872,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                    [full complete code for the file]
                    ```
                    ENDFILE
+                   
+                3. If package installations or terminal actions are needed, output COMMAND: <command> lines.
             """.trimIndent()
 
             val chatResult = aiRepo.chat(
@@ -874,7 +885,15 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             if (chatResult.isSuccess) {
                 val rawAiResponse = chatResult.getOrThrow()
                 val parsedFiles = parseFilesFromAiResponse(rawAiResponse)
-                val conversationalText = extractConversationalText(rawAiResponse, parsedFiles.isNotEmpty())
+                val parsedCommands = parseCommandsFromAiResponse(rawAiResponse)
+                val conversationalText = extractConversationalText(rawAiResponse, parsedFiles.isNotEmpty() || parsedCommands.isNotEmpty())
+
+                // Execute any terminal commands requested by the AI
+                if (parsedCommands.isNotEmpty()) {
+                    parsedCommands.forEach { cmd ->
+                        executeTerminalCommand(cmd)
+                    }
+                }
 
                 if (parsedFiles.isNotEmpty()) {
                     val artifact = CodeArtifact(
@@ -892,9 +911,11 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                         ?: updatedFiles.firstOrNull()
 
                     val explanationPrefix = if (conversationalText.isNotBlank()) "$conversationalText\n\n" else ""
+                    val commandInfo = if (parsedCommands.isNotEmpty()) "\n⚡ Executed in Terminal: ${parsedCommands.joinToString(", ") { "`$it`" }}\n" else ""
                     val completionMsg = "${explanationPrefix}✨ Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
                             parsedFiles.joinToString("\n") { "• ${it.path}" } +
-                            "\n\nCheck the Preview tab to see the live updates, or the Code tab to inspect the source code."
+                            commandInfo +
+                            "\n\nCheck the Preview tab to see the live updates, or the Code & Terminal tabs to inspect the changes."
                     
                     persistMessage("AI", completionMsg)
 
@@ -917,6 +938,15 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                         previewHtml = updatedHtml ?: _state.value.previewHtml,
                         notification = "Applied updates to project files!"
                     )
+                } else if (parsedCommands.isNotEmpty()) {
+                    val commandInfo = "⚡ Executed ${parsedCommands.size} command(s) in Embedded Linux Terminal:\n" +
+                            parsedCommands.joinToString("\n") { "• `$it`" } +
+                            "\n\nCheck the Terminal tab to see live execution logs."
+                    val replyText = if (conversationalText.isNotBlank()) "$conversationalText\n\n$commandInfo" else commandInfo
+                    persistMessage("AI", replyText)
+                    _state.value = _state.value.copy(
+                        isAiRefining = false
+                    )
                 } else {
                     // Conversational response without file updates
                     val cleanReply = conversationalText.ifBlank { rawAiResponse.trim() }
@@ -936,6 +966,18 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 )
             }
         }
+    }
+
+    private fun parseCommandsFromAiResponse(raw: String): List<String> {
+        val commands = mutableListOf<String>()
+        val regex = Regex("""(?:COMMAND|RUN|EXEC):\s*([^\r\n]+)""", RegexOption.IGNORE_CASE)
+        for (match in regex.findAll(raw)) {
+            val cmd = match.groupValues[1].trim().removeSurrounding("`").trim()
+            if (cmd.isNotBlank()) {
+                commands.add(cmd)
+            }
+        }
+        return commands
     }
 
     private fun parseFilesFromAiResponse(raw: String): List<SourceFile> {
@@ -961,8 +1003,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         return parsedFiles
     }
 
-    private fun extractConversationalText(raw: String, hasCodeFiles: Boolean): String {
-        if (!hasCodeFiles) {
+    private fun extractConversationalText(raw: String, hasAction: Boolean): String {
+        if (!hasAction) {
             return raw.trim()
         }
         var cleaned = raw
@@ -970,6 +1012,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         cleaned = fileBlockRegex.replace(cleaned, "")
         val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)[a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```""", RegexOption.IGNORE_CASE)
         cleaned = secondaryRegex.replace(cleaned, "")
+        val commandRegex = Regex("""(?:COMMAND|RUN|EXEC):\s*[^\r\n]+""", RegexOption.IGNORE_CASE)
+        cleaned = commandRegex.replace(cleaned, "")
         return cleaned.trim()
     }
 
