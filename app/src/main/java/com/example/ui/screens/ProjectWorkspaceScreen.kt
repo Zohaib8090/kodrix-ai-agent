@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
 import com.example.data.services.ProjectFileNode
 import com.example.ui.common.InAppWebPreview

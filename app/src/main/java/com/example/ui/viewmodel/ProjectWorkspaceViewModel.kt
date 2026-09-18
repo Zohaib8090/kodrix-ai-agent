@@ -13,6 +13,7 @@ import com.example.data.local.PreferenceStorage
 import com.example.data.model.AppContext
 import com.example.data.model.CodeArtifact
 import com.example.data.model.PlatformType
+import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
 import com.example.data.model.WebFramework
 import com.example.data.services.AiProviderRepository
