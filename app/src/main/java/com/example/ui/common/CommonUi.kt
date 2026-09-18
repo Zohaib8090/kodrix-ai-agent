@@ -487,9 +487,22 @@ fun InAppWebPreview(
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+                            // Automatically grant webcam & mic requested by the web page (e.g. hand gestures, MediaPipe, audio)
+                            request?.let {
+                                try {
+                                    it.grant(it.resources)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("InAppWebPreview", "Grant webview permission failed: ${e.message}")
+                                }
+                            }
+                        }
+                    }
                     webViewClient = WebViewClient()
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.mediaPlaybackRequiresUserGesture = false
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
                     settings.allowFileAccess = true

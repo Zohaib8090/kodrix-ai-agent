@@ -498,14 +498,18 @@ private fun MainInputBar(
 
                 // Bottom-right: circular peach/orange submit button (44x44px, #F9AD94)
                 val isButtonEnabled = promptText.isNotBlank() && !isLaunching
-                val buttonOpacity = if (isButtonEnabled) 1f else 0.5f
 
                 val submitInteractionSource = remember { MutableInteractionSource() }
                 val isPressed by submitInteractionSource.collectIsPressedAsState()
                 val isHovered by submitInteractionSource.collectIsHoveredAsState()
 
                 val buttonScale by animateFloatAsState(
-                    targetValue = if (isPressed) 0.90f else 1f,
+                    targetValue = when {
+                        isPressed -> 0.90f
+                        isHovered -> 1.08f
+                        isButtonEnabled -> 1.02f
+                        else -> 1f
+                    },
                     animationSpec = spring(
                         dampingRatio = Spring.DampingRatioMediumBouncy,
                         stiffness = Spring.StiffnessLow
@@ -513,19 +517,53 @@ private fun MainInputBar(
                     label = "submitScale"
                 )
 
-                val buttonBg = if (isHovered || isPressed) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primaryContainer
+                // Highlighted button styling: In dark theme, ensures high visibility, luminous glow, and crisp contrast
+                val buttonBg = when {
+                    isButtonEnabled && (isHovered || isPressed) -> LandingPeachHover
+                    isButtonEnabled -> LandingPeach
+                    isFocused || isHovered -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                    else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                }
+
+                val buttonBorder = when {
+                    isButtonEnabled -> BorderStroke(1.5.dp, Color(0xFFFFE5DD))
+                    isFocused || isHovered -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                    else -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.50f))
+                }
+
+                val arrowIconTint = when {
+                    isButtonEnabled -> Color(0xFF1E1E1E)
+                    isFocused || isHovered -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                }
+
+                val buttonElevation by animateDpAsState(
+                    targetValue = when {
+                        isButtonEnabled && isHovered -> 8.dp
+                        isButtonEnabled -> 4.dp
+                        isFocused || isHovered -> 3.dp
+                        else -> 1.dp
+                    },
+                    label = "submitElevation"
+                )
 
                 Box(
                     modifier = Modifier
                         .size(44.dp)
                         .scale(buttonScale)
-                        .alpha(buttonOpacity)
+                        .shadow(
+                            elevation = buttonElevation,
+                            shape = CircleShape,
+                            spotColor = if (isButtonEnabled) LandingPeach.copy(alpha = 0.65f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            ambientColor = Color(0x20000000)
+                        )
                         .clip(CircleShape)
                         .background(buttonBg)
+                        .border(buttonBorder, CircleShape)
                         .clickable(
                             enabled = isButtonEnabled,
                             interactionSource = submitInteractionSource,
-                            indication = ripple(bounded = true, color = MaterialTheme.colorScheme.onPrimary),
+                            indication = ripple(bounded = true, color = if (isButtonEnabled) Color.White else MaterialTheme.colorScheme.primary),
                             onClick = onSubmit
                         )
                         .testTag("submit_peach_button"),
@@ -534,14 +572,14 @@ private fun MainInputBar(
                     if (isLaunching) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = MaterialTheme.colorScheme.surface,
+                            color = if (isButtonEnabled) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.primary,
                             strokeWidth = 2.dp
                         )
                     } else {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "Build App",
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = arrowIconTint,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1275,27 +1313,38 @@ private fun AiChatBottomSheet(
                         }
                     )
 
+                    val isChatSendEnabled = inputMessage.isNotBlank()
                     IconButton(
                         onClick = {
-                            if (inputMessage.isNotBlank()) {
+                            if (isChatSendEnabled) {
                                 val text = inputMessage
                                 inputMessage = ""
                                 viewModel.sendChatMessage(text)
                             }
                         },
-                        enabled = inputMessage.isNotBlank(),
+                        enabled = isChatSendEnabled,
                         modifier = Modifier
                             .size(36.dp)
+                            .shadow(
+                                elevation = if (isChatSendEnabled) 3.dp else 0.dp,
+                                shape = CircleShape,
+                                spotColor = LandingPeach.copy(alpha = 0.5f)
+                            )
                             .clip(CircleShape)
                             .background(
-                                if (inputMessage.isNotBlank()) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                if (isChatSendEnabled) LandingPeach else MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isChatSendEnabled) Color(0xFFFFDBCF) else MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                                shape = CircleShape
                             )
                             .testTag("ai_chat_send_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Send",
-                            tint = if (inputMessage.isNotBlank()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isChatSendEnabled) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                             modifier = Modifier.size(16.dp)
                         )
                     }

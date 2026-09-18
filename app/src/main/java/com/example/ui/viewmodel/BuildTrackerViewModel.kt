@@ -26,6 +26,7 @@ import com.example.data.services.NodeService
 import com.example.data.services.ProjectRepository
 import com.example.data.services.SecretsService
 import com.example.data.services.WorkflowService
+import com.example.util.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -135,6 +136,16 @@ class BuildTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                     db.buildRecordDao().update(updatedRecord)
                     _state.value = _state.value.copy(buildRecord = updatedRecord)
+
+                    try {
+                        NotificationHelper.notifyBuildCompleted(
+                            context = context,
+                            projectName = record.appName,
+                            projectId = record.id,
+                            isSuccess = true
+                        )
+                    } catch (_: Exception) {}
+
                     return
                 } else {
                     val msg = "GitHub configuration required for compiling Android APK in the cloud. Please configure your GitHub Username, Repository, and Personal Access Token (PAT) in Settings (gear icon in the top bar)."
@@ -294,6 +305,16 @@ class BuildTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                     db.buildRecordDao().update(updatedRecord)
                     _state.value = _state.value.copy(buildRecord = updatedRecord)
+
+                    try {
+                        NotificationHelper.notifyBuildCompleted(
+                            context = context,
+                            projectName = record.appName,
+                            projectId = record.id,
+                            isSuccess = true,
+                            customMessage = "APK compiled successfully! Tap to install."
+                        )
+                    } catch (_: Exception) {}
                 } else {
                     val err = artifactResult.exceptionOrNull()?.message ?: "Failed to retrieve real artifact from build run"
                     updatePhase(BuildPhase.Failed(err), "Failed", record.id)

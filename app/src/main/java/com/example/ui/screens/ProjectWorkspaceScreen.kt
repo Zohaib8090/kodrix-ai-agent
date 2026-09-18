@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -39,6 +40,8 @@ import com.example.data.model.SourceFile
 import com.example.data.services.ProjectFileNode
 import com.example.ui.common.InAppWebPreview
 import com.example.ui.theme.InterFontFamily
+import com.example.ui.theme.LandingPeach
+import com.example.ui.theme.LandingPeachHover
 import com.example.ui.viewmodel.ProjectWorkspaceViewModel
 import com.example.ui.viewmodel.WorkspaceBottomNav
 import com.example.ui.viewmodel.WorkspaceChatMessage
@@ -486,6 +489,7 @@ private fun AiChatTab(
                     maxLines = 3
                 )
                 Spacer(modifier = Modifier.width(8.dp))
+                val isRefineSendEnabled = !isAiRefining && promptInput.isNotBlank()
                 IconButton(
                     onClick = {
                         if (promptInput.isNotBlank()) {
@@ -494,21 +498,31 @@ private fun AiChatTab(
                             onSendMessage(text)
                         }
                     },
-                    enabled = !isAiRefining && promptInput.isNotBlank(),
+                    enabled = isRefineSendEnabled,
                     modifier = Modifier
                         .size(44.dp)
+                        .shadow(
+                            elevation = if (isRefineSendEnabled) 4.dp else 1.dp,
+                            shape = CircleShape,
+                            spotColor = if (isRefineSendEnabled) LandingPeach.copy(alpha = 0.6f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                        )
                         .clip(CircleShape)
                         .background(
-                            if (promptInput.isNotBlank() && !isAiRefining) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant
+                            if (isRefineSendEnabled) LandingPeach
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                        )
+                        .border(
+                            width = 1.5.dp,
+                            color = if (isRefineSendEnabled) Color(0xFFFFE5DD) else MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
+                            shape = CircleShape
                         )
                         .testTag("ai_refine_send_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = if (promptInput.isNotBlank() && !isAiRefining) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (isRefineSendEnabled) Color(0xFF1E1E1E)
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
                     )
                 }
             }

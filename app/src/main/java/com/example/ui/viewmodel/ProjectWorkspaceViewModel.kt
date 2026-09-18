@@ -19,6 +19,7 @@ import com.example.data.services.AiProviderRepository
 import com.example.data.services.NodeService
 import com.example.data.services.ProjectFileNode
 import com.example.data.services.ProjectRepository
+import com.example.util.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -194,6 +195,16 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             webDeployUrl = if (isWeb) "http://localhost:5173" else null
         )
         db.buildRecordDao().update(updatedRecord)
+
+        // Trigger background notification to alert user that project coding is complete
+        try {
+            NotificationHelper.notifyBuildCompleted(
+                context = context,
+                projectName = record.appName,
+                projectId = record.id,
+                isSuccess = true
+            )
+        } catch (_: Exception) {}
 
         val completionMsg = WorkspaceChatMessage(
             sender = "AI",
@@ -403,6 +414,16 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                             artifact.files.joinToString("\n") { "• ${it.path}" } +
                             "\n\nCheck the Preview tab to see the live updates, or the Code tab to see the modified code!"
                 )
+
+                // Trigger background notification
+                try {
+                    NotificationHelper.notifyAiRefineCompleted(
+                        context = context,
+                        projectName = currentRecord.appName,
+                        projectId = currentRecord.id,
+                        summary = "Updated ${artifact.files.size} file(s) for your prompt."
+                    )
+                } catch (_: Exception) {}
 
                 _state.value = _state.value.copy(
                     isAiRefining = false,

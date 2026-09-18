@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "No-Code App Builder"
+rootProject.name = "kodrix-ai-agent"
 
 include(":app")

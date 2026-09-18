@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">No-Code App Builder</string>
+    <string name="app_name">kodrix-ai-agent</string>
     <string name="nav_build">Build</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
