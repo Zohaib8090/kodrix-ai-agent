@@ -86,6 +86,20 @@ class ProjectRepository(private val context: Context) {
         }
     }
 
+    suspend fun renameProject(oldName: String, newName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val oldDir = getProjectDir(oldName)
+            val newDir = getProjectDir(newName)
+            if (oldDir.exists() && oldDir.absolutePath != newDir.absolutePath) {
+                oldDir.renameTo(newDir)
+            } else {
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun listProjects(): List<File> = withContext(Dispatchers.IO) {
         rootProjectsDir.listFiles()?.filter { it.isDirectory }?.toList() ?: emptyList()
     }
