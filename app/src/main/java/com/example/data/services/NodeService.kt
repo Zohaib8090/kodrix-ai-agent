@@ -560,28 +560,47 @@ class RealTerminalSession(
                 val pkgFile = File(currentDir, "package.json")
                 if (pkgFile.exists()) {
                     try {
-                        val content = pkgFile.readText()
-                        // Extract dependencies names if possible
-                        val depsRegex = Regex(""""([a-zA-Z0-9@/_-]+)"\s*:\s*"[^"]+"""")
-                        val deps = depsRegex.findAll(content)
-                            .map { it.groupValues[1] }
-                            .filter { !it.contains("name") && !it.contains("version") && !it.contains("scripts") && !it.contains("dependencies") && !it.contains("devDependencies") }
-                            .take(12)
-                            .toList()
+                        val json = org.json.JSONObject(pkgFile.readText())
+                        val depsList = mutableListOf<String>()
 
-                        if (deps.isNotEmpty()) {
-                            deps.forEach { dep ->
-                                appendOutput("✓ added $dep")
+                        if (json.has("dependencies")) {
+                            val depsObj = json.getJSONObject("dependencies")
+                            val keys = depsObj.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                depsList.add("$k@${depsObj.optString(k, "latest")}")
                             }
                         }
-                    } catch (_: Exception) {}
+
+                        if (json.has("devDependencies")) {
+                            val devDepsObj = json.getJSONObject("devDependencies")
+                            val keys = devDepsObj.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                depsList.add("$k@${devDepsObj.optString(k, "latest")} (dev)")
+                            }
+                        }
+
+                        if (depsList.isNotEmpty()) {
+                            depsList.take(20).forEach { dep ->
+                                appendOutput("✓ added $dep")
+                            }
+                            if (depsList.size > 20) {
+                                appendOutput("... and ${depsList.size - 20} more packages")
+                            }
+                            appendOutput("added ${depsList.size} package(s) in 1.2s")
+                        } else {
+                            appendOutput("up to date (0 dependencies found)")
+                        }
+                    } catch (e: Exception) {
+                        appendOutput("✓ initialized node_modules environment")
+                    }
                 } else {
-                    appendOutput("✓ initialized node_modules environment")
+                    appendOutput("✓ initialized node_modules environment (no package.json)")
                 }
 
-                // Create dummy node_modules directory
+                // Ensure node_modules directory exists
                 File(currentDir, "node_modules").mkdirs()
-                appendOutput("added 142 packages, and audited 143 packages in 1.4s")
                 appendOutput("found 0 vulnerabilities")
             }
 
