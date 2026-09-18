@@ -49,7 +49,12 @@ data class ProviderConfig(
     val supportsVision: Boolean = false,
     val isPrimary: Boolean = false,
     val isEnabled: Boolean = true,
-    val availableModels: List<String> = emptyList()
+    val availableModels: List<String> = emptyList(),
+    val thinkingEnabled: Boolean = false,
+    val thinkingLevel: String = "medium",
+    val thinkingBudgetTokens: Int = 2048,
+    val supportedThinkingLevels: List<String> = listOf("low", "medium", "high", "ultra", "adaptive"),
+    val customPayloadJson: String = ""
 )
 
 enum class AuthStyle {

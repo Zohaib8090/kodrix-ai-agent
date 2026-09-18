@@ -32,7 +32,26 @@ class GeminiProvider(config: ProviderConfig) : BaseAiProvider(config) {
                     })
                 }
                 put("contents", contents)
+
+                if (config.thinkingEnabled) {
+                    val budget = when (config.thinkingLevel.lowercase()) {
+                        "low" -> 1024
+                        "medium" -> 2048
+                        "high" -> 4096
+                        "ultra" -> 8192
+                        "adaptive" -> -1
+                        else -> config.thinkingLevel.toIntOrNull() ?: config.thinkingBudgetTokens
+                    }
+                    val genConfig = JSONObject()
+                    if (budget > 0) {
+                        genConfig.put("thinkingConfig", JSONObject().apply {
+                            put("thinkingBudget", budget)
+                        })
+                    }
+                    put("generationConfig", genConfig)
+                }
             }
+            mergeCustomPayload(body)
 
             val request = Request.Builder()
                 .url(url)
@@ -111,7 +130,6 @@ class AnthropicProvider(config: ProviderConfig) : BaseAiProvider(config) {
             val url = if (base.endsWith("/")) "${base}messages" else "$base/messages"
             val body = JSONObject().apply {
                 put("model", model)
-                put("max_tokens", 4096)
                 put("system", systemPrompt)
                 val msgs = JSONArray().apply {
                     put(JSONObject().apply {
@@ -120,7 +138,27 @@ class AnthropicProvider(config: ProviderConfig) : BaseAiProvider(config) {
                     })
                 }
                 put("messages", msgs)
+
+                if (config.thinkingEnabled) {
+                    val budget = when (config.thinkingLevel.lowercase()) {
+                        "low" -> 1024
+                        "medium" -> 2048
+                        "high" -> 4096
+                        "ultra" -> 8192
+                        "adaptive" -> 2048
+                        else -> config.thinkingLevel.toIntOrNull() ?: config.thinkingBudgetTokens
+                    }.coerceAtLeast(1024)
+                    put("max_tokens", budget + 4096)
+                    put("thinking", JSONObject().apply {
+                        put("type", "enabled")
+                        put("budget_tokens", budget)
+                    })
+                } else {
+                    put("max_tokens", 4096)
+                }
             }
+            mergeCustomPayload(body)
+
             val request = Request.Builder()
                 .url(url)
                 .header("x-api-key", key)
@@ -134,7 +172,20 @@ class AnthropicProvider(config: ProviderConfig) : BaseAiProvider(config) {
             if (response.isSuccessful) {
                 val json = JSONObject(respStr)
                 val contentArray = json.optJSONArray("content")
-                val text = contentArray?.optJSONObject(0)?.optString("text") ?: ""
+                // With thinking, Anthropic returns thinking block first, then text block
+                var text = ""
+                if (contentArray != null) {
+                    for (i in 0 until contentArray.length()) {
+                        val block = contentArray.optJSONObject(i)
+                        if (block?.optString("type") == "text") {
+                            text = block.optString("text", "")
+                            break
+                        }
+                    }
+                    if (text.isEmpty() && contentArray.length() > 0) {
+                        text = contentArray.optJSONObject(contentArray.length() - 1)?.optString("text") ?: ""
+                    }
+                }
                 Result.success(text)
             } else {
                 Result.failure(Exception("Claude error: HTTP ${response.code} $respStr"))

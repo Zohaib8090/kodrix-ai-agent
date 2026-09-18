@@ -196,6 +196,7 @@ class PreferenceStorage(context: Context) {
             val array = JSONArray(jsonString)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val providerId = obj.optString("id")
                 val modelsArray = obj.optJSONArray("availableModels")
                 val modelsList = mutableListOf<String>()
                 if (modelsArray != null) {
@@ -203,9 +204,18 @@ class PreferenceStorage(context: Context) {
                         modelsList.add(modelsArray.getString(j))
                     }
                 }
+                val thinkingLevelsArray = obj.optJSONArray("supportedThinkingLevels")
+                val thinkingLevelsList = mutableListOf<String>()
+                if (thinkingLevelsArray != null) {
+                    for (k in 0 until thinkingLevelsArray.length()) {
+                        thinkingLevelsList.add(thinkingLevelsArray.getString(k))
+                    }
+                }
+                val defaultThinkingLevels = listOf("low", "medium", "high", "ultra", "adaptive")
+
                 list.add(
                     ProviderConfig(
-                        id = obj.optString("id"),
+                        id = providerId,
                         name = obj.optString("name"),
                         apiKey = obj.optString("apiKey"),
                         baseUrl = obj.optString("baseUrl"),
@@ -217,7 +227,12 @@ class PreferenceStorage(context: Context) {
                         supportsVision = obj.optBoolean("supportsVision", false),
                         isPrimary = obj.optBoolean("isPrimary", false),
                         isEnabled = obj.optBoolean("isEnabled", true),
-                        availableModels = getDefaultModelsForProvider(obj.optString("id"))
+                        availableModels = if (modelsList.isNotEmpty()) modelsList else getDefaultModelsForProvider(providerId),
+                        thinkingEnabled = obj.optBoolean("thinkingEnabled", false),
+                        thinkingLevel = obj.optString("thinkingLevel", "medium"),
+                        thinkingBudgetTokens = obj.optInt("thinkingBudgetTokens", 2048),
+                        supportedThinkingLevels = if (thinkingLevelsList.isNotEmpty()) thinkingLevelsList else defaultThinkingLevels,
+                        customPayloadJson = obj.optString("customPayloadJson", "")
                     )
                 )
             }
@@ -246,6 +261,13 @@ class PreferenceStorage(context: Context) {
                 val modelsArr = JSONArray()
                 p.availableModels.forEach { modelsArr.put(it) }
                 put("availableModels", modelsArr)
+                put("thinkingEnabled", p.thinkingEnabled)
+                put("thinkingLevel", p.thinkingLevel)
+                put("thinkingBudgetTokens", p.thinkingBudgetTokens)
+                val thinkingLevelsArr = JSONArray()
+                p.supportedThinkingLevels.forEach { thinkingLevelsArr.put(it) }
+                put("supportedThinkingLevels", thinkingLevelsArr)
+                put("customPayloadJson", p.customPayloadJson)
             }
             array.put(obj)
         }

@@ -295,7 +295,148 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         _state.value = _state.value.copy(providers = updated)
     }
 
-    fun addCustomProvider(name: String, baseUrl: String, apiKey: String, modelName: String, type: String = "OpenAI Compatible") {
+    fun updateProviderThinking(providerId: String, enabled: Boolean, level: String? = null, budgetTokens: Int? = null) {
+        val updated = _state.value.providers.map { p ->
+            if (p.id == providerId) {
+                p.copy(
+                    thinkingEnabled = enabled,
+                    thinkingLevel = level ?: p.thinkingLevel,
+                    thinkingBudgetTokens = budgetTokens ?: p.thinkingBudgetTokens
+                )
+            } else p
+        }
+        prefs.saveProviders(updated)
+        _state.value = _state.value.copy(providers = updated)
+        triggerHaptic()
+    }
+
+    fun addCustomThinkingLevel(providerId: String, level: String) {
+        val trimmed = level.trim().lowercase()
+        if (trimmed.isBlank()) return
+        val updated = _state.value.providers.map { p ->
+            if (p.id == providerId) {
+                val newLevels = if (p.supportedThinkingLevels.contains(trimmed)) {
+                    p.supportedThinkingLevels
+                } else {
+                    p.supportedThinkingLevels + trimmed
+                }
+                p.copy(
+                    thinkingLevel = trimmed,
+                    supportedThinkingLevels = newLevels,
+                    thinkingEnabled = true
+                )
+            } else p
+        }
+        prefs.saveProviders(updated)
+        _state.value = _state.value.copy(providers = updated)
+        triggerHaptic()
+    }
+
+    fun updateProviderCustomPayload(providerId: String, customPayloadJson: String) {
+        val updated = _state.value.providers.map { p ->
+            if (p.id == providerId) p.copy(customPayloadJson = customPayloadJson) else p
+        }
+        prefs.saveProviders(updated)
+        _state.value = _state.value.copy(providers = updated)
+    }
+
+    fun updateProviderFullConfig(updatedConfig: ProviderConfig) {
+        val updated = _state.value.providers.map { p ->
+            if (p.id == updatedConfig.id) updatedConfig else p
+        }
+        prefs.saveProviders(updated)
+        _state.value = _state.value.copy(providers = updated)
+        triggerHaptic()
+    }
+
+    fun updateProviderFromJson(providerId: String, json: String): Result<Unit> {
+        return try {
+            val obj = org.json.JSONObject(json.trim())
+            val current = _state.value.providers.find { it.id == providerId }
+                ?: return Result.failure(Exception("Provider not found"))
+
+            val modelsArray = obj.optJSONArray("availableModels")
+            val modelsList = mutableListOf<String>()
+            if (modelsArray != null) {
+                for (j in 0 until modelsArray.length()) {
+                    modelsList.add(modelsArray.getString(j))
+                }
+            }
+
+            val thinkingLevelsArray = obj.optJSONArray("supportedThinkingLevels")
+            val thinkingLevelsList = mutableListOf<String>()
+            if (thinkingLevelsArray != null) {
+                for (k in 0 until thinkingLevelsArray.length()) {
+                    thinkingLevelsList.add(thinkingLevelsArray.getString(k))
+                }
+            }
+
+            val authStyleStr = obj.optString("authStyle", current.authStyle.name)
+            val authStyle = try { AuthStyle.valueOf(authStyleStr) } catch (_: Exception) { current.authStyle }
+
+            val updatedConfig = current.copy(
+                name = obj.optString("name", current.name),
+                apiKey = obj.optString("apiKey", current.apiKey),
+                baseUrl = obj.optString("baseUrl", current.baseUrl),
+                authStyle = authStyle,
+                defaultModel = obj.optString("defaultModel", current.defaultModel),
+                supportsVision = obj.optBoolean("supportsVision", current.supportsVision),
+                isEnabled = obj.optBoolean("isEnabled", current.isEnabled),
+                availableModels = if (modelsList.isNotEmpty()) modelsList else current.availableModels,
+                thinkingEnabled = obj.optBoolean("thinkingEnabled", current.thinkingEnabled),
+                thinkingLevel = obj.optString("thinkingLevel", current.thinkingLevel),
+                thinkingBudgetTokens = obj.optInt("thinkingBudgetTokens", current.thinkingBudgetTokens),
+                supportedThinkingLevels = if (thinkingLevelsList.isNotEmpty()) thinkingLevelsList else current.supportedThinkingLevels,
+                customPayloadJson = obj.optString("customPayloadJson", current.customPayloadJson)
+            )
+
+            updateProviderFullConfig(updatedConfig)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun exportProviderToJson(provider: ProviderConfig): String {
+        val obj = org.json.JSONObject().apply {
+            put("id", provider.id)
+            put("name", provider.name)
+            put("apiKey", provider.apiKey)
+            put("baseUrl", provider.baseUrl)
+            put("authStyle", provider.authStyle.name)
+            put("defaultModel", provider.defaultModel)
+            put("supportsVision", provider.supportsVision)
+            put("isEnabled", provider.isEnabled)
+            val modelsArr = org.json.JSONArray()
+            provider.availableModels.forEach { modelsArr.put(it) }
+            put("availableModels", modelsArr)
+            put("thinkingEnabled", provider.thinkingEnabled)
+            put("thinkingLevel", provider.thinkingLevel)
+            put("thinkingBudgetTokens", provider.thinkingBudgetTokens)
+            val levelsArr = org.json.JSONArray()
+            provider.supportedThinkingLevels.forEach { levelsArr.put(it) }
+            put("supportedThinkingLevels", levelsArr)
+            put("customPayloadJson", provider.customPayloadJson)
+        }
+        return obj.toString(2)
+    }
+
+    fun deleteCustomProvider(providerId: String) {
+        prefs.removeProvider(providerId)
+        val updated = _state.value.providers.filterNot { it.id == providerId }
+        _state.value = _state.value.copy(providers = updated)
+        triggerHaptic()
+    }
+
+    fun addCustomProvider(
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        modelName: String,
+        type: String = "OpenAI Compatible",
+        thinkingEnabled: Boolean = false,
+        thinkingLevel: String = "medium"
+    ) {
         val prefix = when(type) {
             "Anthropic Compatible" -> "custom_anthropic_"
             "Gemini Compatible" -> "custom_gemini_"
@@ -316,7 +457,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             isEnabled = true,
             isValid = false,
             statusMessage = "Custom configured",
-            availableModels = listOf(modelName.trim().ifBlank { "custom-model" })
+            availableModels = listOf(modelName.trim().ifBlank { "custom-model" }),
+            thinkingEnabled = thinkingEnabled,
+            thinkingLevel = thinkingLevel,
+            supportedThinkingLevels = listOf("low", "medium", "high", "ultra", "adaptive")
         )
         val current = _state.value.providers.toMutableList().apply { add(newProvider) }
         prefs.saveProviders(current)
@@ -345,6 +489,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val authStyle = try { AuthStyle.valueOf(authStyleStr.uppercase()) } catch (_: Exception) { AuthStyle.BEARER }
                 val supportsVision = obj.optBoolean("supportsVision", false)
                 val isEnabled = obj.optBoolean("isEnabled", true)
+                val thinkingEnabled = obj.optBoolean("thinkingEnabled", false)
+                val thinkingLevel = obj.optString("thinkingLevel", "medium")
+                val customPayloadJson = obj.optString("customPayloadJson", "")
                 return ProviderConfig(
                     id = id,
                     name = name,
@@ -356,7 +503,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     isValid = false,
                     supportsVision = supportsVision,
                     statusMessage = "Imported from JSON",
-                    availableModels = listOf(model)
+                    availableModels = listOf(model),
+                    thinkingEnabled = thinkingEnabled,
+                    thinkingLevel = thinkingLevel,
+                    customPayloadJson = customPayloadJson
                 )
             }
 

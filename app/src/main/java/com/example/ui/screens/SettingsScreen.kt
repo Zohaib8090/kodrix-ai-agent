@@ -26,6 +26,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +48,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -56,6 +58,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -148,6 +151,7 @@ fun SettingsScreen(
     var selectedCategoryFilter by remember { mutableStateOf("All") }
     var showAddCustomProviderDialog by remember { mutableStateOf(false) }
     var showLogsDialog by remember { mutableStateOf(false) }
+    var inspectingProvider by remember { mutableStateOf<ProviderConfig?>(null) }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -627,6 +631,10 @@ fun SettingsScreen(
                                 onUpdateApiKey = { key -> viewModel.updateProviderApiKey(provider.id, key) },
                                 onUpdateModel = { model -> viewModel.updateProviderModel(provider.id, model) },
                                 onUpdateBaseUrl = { url -> viewModel.updateProviderBaseUrl(provider.id, url) },
+                                onUpdateThinking = { enabled, level -> viewModel.updateProviderThinking(provider.id, enabled, level) },
+                                onAddCustomThinkingLevel = { level -> viewModel.addCustomThinkingLevel(provider.id, level) },
+                                onInspectJson = { inspectingProvider = provider },
+                                onDelete = { viewModel.deleteCustomProvider(provider.id) },
                                 onVerify = { viewModel.verifyProvider(provider.id) }
                             )
                         }
@@ -1034,6 +1042,8 @@ fun SettingsScreen(
         var apiKey by remember { mutableStateOf("") }
         var modelName by remember { mutableStateOf("") }
         var providerType by remember { mutableStateOf("OpenAI Compatible") }
+        var thinkingEnabled by remember { mutableStateOf(false) }
+        var thinkingLevel by remember { mutableStateOf("medium") }
         var typeDropdownExpanded by remember { mutableStateOf(false) }
         val types = listOf("OpenAI Compatible", "Anthropic Compatible", "Gemini Compatible")
 
@@ -1192,6 +1202,37 @@ fun SettingsScreen(
                             ),
                             singleLine = true, modifier = Modifier.fillMaxWidth()
                         )
+
+                        // Thinking Mode Option
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                Text("Enable Thinking Mode", fontFamily = InterFontFamily, fontSize = 13.sp)
+                            }
+                            Switch(
+                                checked = thinkingEnabled,
+                                onCheckedChange = { thinkingEnabled = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                        }
+
+                        if (thinkingEnabled) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Thinking Level:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                KodrixChipGroup(
+                                    options = listOf("low", "medium", "high", "ultra", "adaptive"),
+                                    selectedOption = thinkingLevel,
+                                    onSelect = { thinkingLevel = it }
+                                )
+                            }
+                        }
                     }
                 } else {
                     // JSON import tab
@@ -1209,7 +1250,7 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "{ \"name\": \"MyProvider\", \"baseUrl\": \"https://api.x.ai/v1\", \"apiKey\": \"sk-...\", \"defaultModel\": \"grok-2\" }",
+                                text = "{ \"name\": \"MyProvider\", \"baseUrl\": \"https://api.x.ai/v1\", \"apiKey\": \"sk-...\", \"defaultModel\": \"grok-2\", \"thinkingEnabled\": true, \"thinkingLevel\": \"medium\" }",
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1259,7 +1300,7 @@ fun SettingsScreen(
                     onClick = {
                         if (selectedTab == 0) {
                             if (baseUrl.isNotBlank()) {
-                                viewModel.addCustomProvider(name, baseUrl, apiKey, modelName, providerType)
+                                viewModel.addCustomProvider(name, baseUrl, apiKey, modelName, providerType, thinkingEnabled, thinkingLevel)
                                 showAddCustomProviderDialog = false
                                 Toast.makeText(context, "Custom provider added", Toast.LENGTH_SHORT).show()
                             }
@@ -1284,6 +1325,128 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddCustomProviderDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Modal: Provider JSON Inspector & Customizer Dialog
+    if (inspectingProvider != null) {
+        val targetProvider = inspectingProvider!!
+        var jsonText by remember(targetProvider.id) {
+            mutableStateOf(viewModel.exportProviderToJson(targetProvider))
+        }
+        var jsonError by remember { mutableStateOf("") }
+        val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+        AlertDialog(
+            onDismissRequest = { inspectingProvider = null },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Code,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "JSON: ${targetProvider.name}",
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            val clip = ClipData.newPlainText("provider_config_json", jsonText)
+                            clipboardManager.setPrimaryClip(clip)
+                            Toast.makeText(context, "Provider JSON copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy JSON",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Inspect and customize raw JSON fields, request payload overrides, thinking parameters, and custom models for ${targetProvider.name}:",
+                        fontFamily = InterFontFamily,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedTextField(
+                        value = jsonText,
+                        onValueChange = {
+                            jsonText = it
+                            jsonError = ""
+                        },
+                        minLines = 8,
+                        maxLines = 16,
+                        textStyle = TextStyle(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            focusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (jsonError.isNotBlank()) {
+                        Text(
+                            text = jsonError,
+                            fontFamily = InterFontFamily,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val result = viewModel.updateProviderFromJson(targetProvider.id, jsonText)
+                        if (result.isSuccess) {
+                            Toast.makeText(context, "${targetProvider.name} JSON updated", Toast.LENGTH_SHORT).show()
+                            inspectingProvider = null
+                        } else {
+                            jsonError = "Invalid JSON: ${result.exceptionOrNull()?.localizedMessage ?: "Parse error"}"
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Save & Apply")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { inspectingProvider = null }) {
                     Text("Cancel")
                 }
             }
@@ -1829,6 +1992,10 @@ private fun ProviderManagementCard(
     onUpdateApiKey: (String) -> Unit,
     onUpdateModel: (String) -> Unit,
     onUpdateBaseUrl: (String) -> Unit,
+    onUpdateThinking: (Boolean, String) -> Unit,
+    onAddCustomThinkingLevel: (String) -> Unit,
+    onInspectJson: () -> Unit,
+    onDelete: () -> Unit,
     onVerify: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1842,10 +2009,12 @@ private fun ProviderManagementCard(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = Modifier.fillMaxWidth().testTag("provider_card_${provider.id}")
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("provider_card_${provider.id}")
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            // Header Row: Status, Name, Switch
+            // Header Row: Status, Name, JSON Icon, Switch, Expand
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1854,7 +2023,14 @@ private fun ProviderManagementCard(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.clickable { expanded = !expanded }
+                    modifier = Modifier
+                        .weight(1f)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { expanded = !expanded },
+                                onLongPress = { onInspectJson() }
+                            )
+                        }
                 ) {
                     Box(
                         modifier = Modifier
@@ -1863,15 +2039,31 @@ private fun ProviderManagementCard(
                             .background(if (isConnected) StatusCompleted else Color(0xFF9E9E9E))
                     )
                     Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = provider.name,
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (provider.thinkingEnabled) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                ) {
+                                    Text(
+                                        text = "🧠 ${provider.thinkingLevel.uppercase()}",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
-                            text = provider.name,
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (isConnected) "Connected" else "Not Connected",
+                            text = if (isConnected) "Connected (Hold to inspect JSON)" else "Not Connected (Hold to inspect JSON)",
                             fontSize = 11.sp,
                             color = if (isConnected) StatusCompleted else MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1880,8 +2072,21 @@ private fun ProviderManagementCard(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // Inspect / Edit JSON Button
+                    IconButton(
+                        onClick = onInspectJson,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Code,
+                            contentDescription = "Inspect / Edit JSON",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
                     IconButton(
                         onClick = { expanded = !expanded },
                         modifier = Modifier.size(28.dp)
@@ -1905,19 +2110,18 @@ private fun ProviderManagementCard(
                 }
             }
 
-            // Expandable Detail Section: API Key, Models, Base URL
+            // Expandable Detail Section: API Key, Models, Thinking, Base URL
             AnimatedVisibility(visible = expanded) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
 
                     // Base URL (if Compatible/Custom)
                     if (provider.id.contains("custom") || provider.id.contains("compatible")) {
-
                         OutlinedTextField(
                             value = baseUrlText,
                             onValueChange = {
@@ -1942,7 +2146,6 @@ private fun ProviderManagementCard(
                     }
 
                     // API Key Field
-
                     OutlinedTextField(
                         value = apiKeyText,
                         onValueChange = {
@@ -2055,24 +2258,172 @@ private fun ProviderManagementCard(
                         }
                     }
 
-                    // Verify button
+                    // Thinking & Reasoning Configuration Section
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = if (provider.thinkingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Thinking / Reasoning Mode",
+                                            fontFamily = InterFontFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (provider.thinkingEnabled) "Enabled (${provider.thinkingLevel})" else "Disabled",
+                                            fontSize = 10.sp,
+                                            color = if (provider.thinkingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Switch(
+                                    checked = provider.thinkingEnabled,
+                                    onCheckedChange = { onUpdateThinking(it, provider.thinkingLevel) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                            }
+
+                            if (provider.thinkingEnabled) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = "Thinking Level / Method:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+
+                                    KodrixChipGroup(
+                                        options = provider.supportedThinkingLevels,
+                                        selectedOption = provider.thinkingLevel,
+                                        onSelect = { onUpdateThinking(true, it) }
+                                    )
+
+                                    var customThinkingInput by remember(provider.id) { mutableStateOf("") }
+                                    var showCustomThinkingInput by remember { mutableStateOf(false) }
+
+                                    if (showCustomThinkingInput) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            OutlinedTextField(
+                                                value = customThinkingInput,
+                                                onValueChange = { customThinkingInput = it },
+                                                label = { Text("Custom Thinking Level / Tokens", fontSize = 10.sp) },
+                                                placeholder = { Text("e.g. 4096, deep_reasoning, turbo", fontSize = 10.sp) },
+                                                singleLine = true,
+                                                textStyle = TextStyle(fontFamily = InterFontFamily, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                                ),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Button(
+                                                onClick = {
+                                                    if (customThinkingInput.isNotBlank()) {
+                                                        onAddCustomThinkingLevel(customThinkingInput.trim())
+                                                        showCustomThinkingInput = false
+                                                        customThinkingInput = ""
+                                                    }
+                                                },
+                                                enabled = customThinkingInput.isNotBlank(),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text("Add", fontSize = 11.sp)
+                                            }
+                                        }
+                                    } else {
+                                        TextButton(
+                                            onClick = { showCustomThinkingInput = true },
+                                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("+ Add Custom Thinking Level", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom Row: Inspect JSON shortcut, Delete (if custom), Verify button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
-                            onClick = onVerify,
-                            enabled = !isVerifying,
-                            shape = RoundedCornerShape(8.dp)
+                        TextButton(
+                            onClick = onInspectJson,
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
                         ) {
-                            if (isVerifying) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Verifying...", fontSize = 12.sp)
-                            } else {
-                                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Verify Key", fontSize = 12.sp)
+                            Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Inspect / Edit JSON", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (provider.id.startsWith("custom_")) {
+                                OutlinedButton(
+                                    onClick = onDelete,
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusFailed),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(13.dp), tint = StatusFailed)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Delete", fontSize = 11.sp)
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = onVerify,
+                                enabled = !isVerifying,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                if (isVerifying) {
+                                    CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Verifying...", fontSize = 11.sp)
+                                } else {
+                                    Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Verify Key", fontSize = 11.sp)
+                                }
                             }
                         }
                     }

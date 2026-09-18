@@ -122,6 +122,19 @@ abstract class BaseAiProvider(
         }
     }
 
+    protected fun mergeCustomPayload(body: JSONObject) {
+        if (config.customPayloadJson.isNotBlank()) {
+            try {
+                val customObj = JSONObject(config.customPayloadJson.trim())
+                val keys = customObj.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    body.put(key, customObj.get(key))
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     protected open suspend fun callAiModel(systemPrompt: String, userPrompt: String): Result<String> {
         // Default OpenAI-compatible chat completion
         val baseUrl = config.baseUrl.ifEmpty { "https://api.openai.com/v1" }
@@ -142,7 +155,25 @@ abstract class BaseAiProvider(
             }
             put("messages", messages)
             put("temperature", 0.3)
+
+            // Thinking / Reasoning parameters for OpenAI, DeepSeek, Groq, OpenRouter, etc.
+            if (config.thinkingEnabled) {
+                when (config.thinkingLevel.lowercase()) {
+                    "low", "medium", "high" -> put("reasoning_effort", config.thinkingLevel.lowercase())
+                    "ultra" -> put("reasoning_effort", "high")
+                    "adaptive" -> put("reasoning_effort", "medium")
+                    else -> {
+                        val asInt = config.thinkingLevel.toIntOrNull()
+                        if (asInt != null) {
+                            put("max_completion_tokens", asInt)
+                        } else {
+                            put("reasoning_effort", config.thinkingLevel)
+                        }
+                    }
+                }
+            }
         }
+        mergeCustomPayload(body)
 
         val request = buildAuthorizedRequest(url, "POST", body.toString())
         val response = client.newCall(request).execute()
