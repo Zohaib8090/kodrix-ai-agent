@@ -12,8 +12,7 @@ import org.json.JSONObject
 
 class GeminiProvider(config: ProviderConfig) : BaseAiProvider(config) {
     override suspend fun callAiModel(systemPrompt: String, userPrompt: String): Result<String> = withContext(Dispatchers.IO) {
-        val rawModel = config.defaultModel.ifEmpty { "gemini-2.5-flash" }
-        val model = if (rawModel.contains("gemini-3.")) "gemini-2.5-flash" else rawModel
+        val model = config.defaultModel.ifEmpty { "gemini-2.5-flash" }
         val key = config.apiKey.trim()
         if (key.isBlank()) {
             return@withContext Result.failure(Exception("Gemini API key is required"))

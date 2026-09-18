@@ -275,9 +275,9 @@ class PreferenceStorage(context: Context) {
             "anthropic", "claude" -> listOf("claude-3-7-sonnet", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229")
             "groq" -> listOf("llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
             "deepseek" -> listOf("deepseek-chat", "deepseek-reasoner", "deepseek-v3")
-            "openrouter" -> listOf("anthropic/claude-3.7-sonnet", "openai/gpt-4o", "deepseek/deepseek-r1", "meta-llama/llama-3.3-70b-instruct")
-            "local_tunnel", "ollama" -> listOf("qwen2.5-coder:latest", "deepseek-r1:latest", "llama3.3:latest")
-            else -> listOf("deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "gpt-4o", "gemini-2.5-flash")
+            "openrouter" -> emptyList()
+            "local_tunnel", "ollama" -> emptyList()
+            else -> emptyList()
         }
     }
 
