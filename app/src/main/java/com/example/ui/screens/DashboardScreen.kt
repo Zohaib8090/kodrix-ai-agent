@@ -1077,6 +1077,8 @@ private fun AiChatBottomSheet(
 ) {
     val messages by viewModel.chatMessages.collectAsState()
     val isGenerating by viewModel.isChatGenerating.collectAsState()
+    val usableProviders by viewModel.usableProviders.collectAsState()
+    val chatProviderId by viewModel.chatProviderId.collectAsState()
     var inputMessage by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -1160,6 +1162,44 @@ private fun AiChatBottomSheet(
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+            // Provider selector chips — only shown when >1 provider has a key
+            if (usableProviders.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    usableProviders.forEach { provider ->
+                        val isSelected = provider.id == chatProviderId
+                        Surface(
+                            onClick = { viewModel.selectChatProvider(provider.id) },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = if (isSelected)
+                                androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primaryContainer)
+                            else
+                                androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            modifier = Modifier.testTag("chat_provider_${provider.id}")
+                        ) {
+                            Text(
+                                text = provider.name,
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            }
 
             // Chat History
             LazyColumn(

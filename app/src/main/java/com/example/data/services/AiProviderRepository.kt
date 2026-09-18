@@ -78,11 +78,22 @@ class AiProviderRepository(
         systemPrompt: String,
         userPrompt: String
     ): Result<String> {
-        val config = getProviderConfig(providerId)
-            ?: preferenceStorage.getProviders().firstOrNull { it.isValid }
-            ?: preferenceStorage.getProviders().first()
+        // Prefer the explicitly selected provider if it has a real API key
+        val selected = getProviderConfig(providerId)
+        val usableConfig = when {
+            selected != null && selected.apiKey.isNotBlank() && selected.apiKey != "dummy_api_key" -> selected
+            else -> preferenceStorage.getProviders()
+                .firstOrNull { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" }
+                ?: preferenceStorage.getProviders().firstOrNull()
+                ?: return Result.failure(Exception("No AI provider configured. Please add an API key in Settings → AI & Models."))
+        }
 
-        val provider = AiProviderFactory.create(config)
+        val provider = AiProviderFactory.create(usableConfig)
         return provider.chat(systemPrompt, userPrompt)
+    }
+
+    fun getUsableProviders(): List<ProviderConfig> {
+        return preferenceStorage.getProviders()
+            .filter { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" }
     }
 }

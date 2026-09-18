@@ -62,6 +62,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val _state = MutableStateFlow(DashboardUiState())
     val state: StateFlow<DashboardUiState> = _state.asStateFlow()
 
+    // Providers that actually have an API key configured
+    private val _usableProviders = MutableStateFlow<List<com.example.data.model.ProviderConfig>>(emptyList())
+    val usableProviders: StateFlow<List<com.example.data.model.ProviderConfig>> = _usableProviders.asStateFlow()
+
+    // Which provider the chat should use right now
+    private val _chatProviderId = MutableStateFlow("")
+    val chatProviderId: StateFlow<String> = _chatProviderId.asStateFlow()
+
     init {
         loadProvidersAndDefaults()
     }
@@ -71,12 +79,25 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         val codegenId = prefs.selectedCodegenProviderId.ifEmpty { "gemini" }
         val fixId = prefs.selectedFixProviderId.ifEmpty { "gemini" }
 
+        // Determine providers that actually have a real API key
+        val usable = aiRepo.getUsableProviders()
+        _usableProviders.value = usable
+        // Auto-select the best chat provider: prefer codegenId if it has a key, else first usable
+        val bestChatProvider = usable.firstOrNull { it.id == codegenId }?.id
+            ?: usable.firstOrNull()?.id
+            ?: codegenId
+        _chatProviderId.value = bestChatProvider
+
         _state.value = _state.value.copy(
             availableProviders = providers,
             selectedCodegenProviderId = codegenId,
             selectedFixProviderId = fixId
         )
         refreshPreview()
+    }
+
+    fun selectChatProvider(providerId: String) {
+        _chatProviderId.value = providerId
     }
 
     fun onPlatformChanged(platform: PlatformType) {
@@ -224,7 +245,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             _isChatGenerating.value = true
-            val providerId = _state.value.selectedCodegenProviderId
+            val providerId = _chatProviderId.value.ifBlank { _state.value.selectedCodegenProviderId }
 
             val systemPrompt = """
                 You are an expert AI Software Architect and UI/UX Designer for Kodrix App Builder.
