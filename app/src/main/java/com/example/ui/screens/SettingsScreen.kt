@@ -1,0 +1,1763 @@
+package com.example.ui.screens
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.R
+import com.example.data.local.BuildRecord
+import com.example.data.model.ProviderConfig
+import com.example.ui.theme.InterFontFamily
+import com.example.ui.theme.StatusCompleted
+import com.example.ui.theme.StatusFailed
+import com.example.ui.theme.StatusInProgress
+import com.example.ui.viewmodel.SettingsUiState
+import com.example.ui.viewmodel.SettingsViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    viewModel: SettingsViewModel,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    var selectedCategoryFilter by remember { mutableStateOf("All") }
+    var showAddCustomProviderDialog by remember { mutableStateOf(false) }
+    var showLogsDialog by remember { mutableStateOf(false) }
+
+    val categories = listOf(
+        "All",
+        "Appearance",
+        "Editor",
+        "AI & Models",
+        "Storage",
+        "Build & Deploy",
+        "Preview",
+        "Terminal"
+    )
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_kodrix_icon),
+                                    contentDescription = null,
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.size(24.dp).clip(RoundedCornerShape(6.dp))
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "Settings",
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Kodrix Agent • V5 Final Handoff",
+                                fontFamily = InterFontFamily,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier.testTag("settings_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        },
+        modifier = modifier.fillMaxSize()
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Category navigation pills
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                categories.forEach { category ->
+                    val isSelected = selectedCategoryFilter == category
+                    Surface(
+                        onClick = { selectedCategoryFilter = category },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        modifier = Modifier.testTag("filter_$category")
+                    ) {
+                        Text(
+                            text = category,
+                            fontFamily = InterFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+
+            // Main Settings Content
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                // CATEGORY 1: Appearance
+                if (selectedCategoryFilter in listOf("All", "Appearance")) {
+                    CategorySection(
+                        title = "CATEGORY 1: Appearance",
+                        icon = Icons.Default.Palette
+                    ) {
+
+                        // Theme: Segmented Button [Light / Dark / System]
+                        SettingItemContainer(label = "Theme") {
+                            SegmentedThemeToggle(
+                                selectedMode = state.themeMode,
+                                onSelect = { viewModel.setThemeMode(it) }
+                            )
+                        }
+
+                        // Accent Color: Color Picker Chips [Peach / Blue / Purple / Green]
+                        SettingItemContainer(label = "Accent Color") {
+                            AccentColorPicker(
+                                selectedColor = state.accentColor,
+                                onSelectColor = { viewModel.setAccentColor(it) }
+                            )
+                        }
+
+                        // Editor Font Size: Slider [12 - 24]
+                        SettingItemContainer(
+                            label = "Editor Font Size",
+                            badge = "${state.editorFontSize} sp"
+                        ) {
+                            Slider(
+                                value = state.editorFontSize.toFloat(),
+                                onValueChange = { viewModel.setEditorFontSize(it.toInt()) },
+                                valueRange = 12f..24f,
+                                steps = 11,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("editor_font_size_slider")
+                            )
+                        }
+
+                        // Font Family: Dropdown [JetBrains Mono / Fira Code / Inter]
+                        SettingItemContainer(label = "Font Family") {
+                            KodrixDropdown(
+                                items = listOf("JetBrains Mono", "Fira Code", "Inter"),
+                                selectedItem = state.editorFontFamily,
+                                onSelect = { viewModel.setEditorFontFamily(it) },
+                                modifier = Modifier.testTag("font_family_dropdown")
+                            )
+                        }
+
+                        // Haptics: Switch
+                        SettingSwitchRow(
+                            title = "Haptics",
+                            subtitle = "Tactile vibration feedback on button presses and actions",
+                            checked = state.hapticsEnabled,
+                            onCheckedChange = { viewModel.setHapticsEnabled(it) },
+                            testTag = "haptics_switch"
+                        )
+                    }
+                }
+
+                // CATEGORY 2: Editor & Workspace
+                if (selectedCategoryFilter in listOf("All", "Editor")) {
+                    CategorySection(
+                        title = "CATEGORY 2: Editor & Workspace",
+                        icon = Icons.Default.Code
+                    ) {
+                        // Word Wrap: Switch
+                        SettingSwitchRow(
+                            title = "Word Wrap",
+                            subtitle = "Wrap long lines to fit viewport width",
+                            checked = state.wordWrap,
+                            onCheckedChange = { viewModel.setWordWrap(it) },
+                            testTag = "word_wrap_switch"
+                        )
+
+                        // Line Numbers: Switch
+                        SettingSwitchRow(
+                            title = "Line Numbers",
+                            subtitle = "Display gutter line numbering in the code view",
+                            checked = state.lineNumbers,
+                            onCheckedChange = { viewModel.setLineNumbers(it) },
+                            testTag = "line_numbers_switch"
+                        )
+
+                        // Minimap: Switch
+                        SettingSwitchRow(
+                            title = "Minimap",
+                            subtitle = "Display visual code overview bar on right side",
+                            checked = state.minimap,
+                            onCheckedChange = { viewModel.setMinimap(it) },
+                            testTag = "minimap_switch"
+                        )
+
+                        // Tab Size: Segmented Button [2 / 4]
+                        SettingItemContainer(label = "Tab Size") {
+                            KodrixSegmentedButton(
+                                items = listOf("2", "4"),
+                                selectedItem = state.tabSize.toString(),
+                                onSelect = { viewModel.setTabSize(it.toIntOrNull() ?: 2) },
+                                modifier = Modifier.testTag("tab_size_segmented_button")
+                            )
+                        }
+
+                        // Auto Save: Switch
+                        SettingSwitchRow(
+                            title = "Auto Save",
+                            subtitle = "Automatically save modifications to project disk",
+                            checked = state.autoSave,
+                            onCheckedChange = { viewModel.setAutoSave(it) },
+                            testTag = "auto_save_switch"
+                        )
+
+                        // Auto Save Delay: Slider [1s / 3s / 5s]
+                        AnimatedVisibility(visible = state.autoSave) {
+                            SettingItemContainer(
+                                label = "Auto Save Delay",
+                                badge = "${state.autoSaveDelay}s"
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(1, 3, 5).forEach { delaySec ->
+                                        val isSelected = state.autoSaveDelay == delaySec
+                                        OutlinedButton(
+                                            onClick = { viewModel.setAutoSaveDelay(delaySec) },
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("${delaySec}s", fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Keyboard Layout: Dropdown [Native / Vim]
+                        SettingItemContainer(label = "Keyboard Layout") {
+                            KodrixDropdown(
+                                items = listOf("Native", "Vim"),
+                                selectedItem = state.keyboardLayout,
+                                onSelect = { viewModel.setKeyboardLayout(it) },
+                                modifier = Modifier.testTag("keyboard_layout_dropdown")
+                            )
+                        }
+                    }
+                }
+
+                // CATEGORY 3: AI & Models
+                if (selectedCategoryFilter in listOf("All", "AI & Models")) {
+                    CategorySection(
+                        title = "CATEGORY 3: AI & Models",
+                        icon = Icons.Default.AutoAwesome
+                    ) {
+                        // Default Provider: Segmented Button [Gemini / OpenAI / Claude / Groq / Compatible]
+                        SettingItemContainer(label = "Default Provider") {
+                            KodrixSegmentedButton(
+                                items = listOf("Gemini", "OpenAI", "Claude", "Groq", "Compatible"),
+                                selectedItem = state.defaultProvider,
+                                onSelect = { viewModel.setDefaultProvider(it) },
+                                modifier = Modifier.testTag("default_provider_segmented_button")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Manage Providers",
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        // Manage Providers cards: Gemini, OpenAI, Claude, Groq, OpenAI Compatible
+                        state.providers.forEach { provider ->
+                            ProviderManagementCard(
+                                provider = provider,
+                                isVerifying = state.verifyingProviderId == provider.id,
+                                onToggleEnabled = { enabled -> viewModel.toggleProviderEnabled(provider.id, enabled) },
+                                onUpdateApiKey = { key -> viewModel.updateProviderApiKey(provider.id, key) },
+                                onUpdateModel = { model -> viewModel.updateProviderModel(provider.id, model) },
+                                onUpdateBaseUrl = { url -> viewModel.updateProviderBaseUrl(provider.id, url) },
+                                onVerify = { viewModel.verifyProvider(provider.id) }
+                            )
+                        }
+
+                        // Add Custom Provider Button
+                        Button(
+                            onClick = { showAddCustomProviderDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("add_custom_provider_button")
+                        ) {
+                            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Add Custom Provider", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                // CATEGORY 4: Projects & Storage
+                if (selectedCategoryFilter in listOf("All", "Storage")) {
+                    CategorySection(
+                        title = "CATEGORY 4: Projects & Storage",
+                        icon = Icons.Default.Folder
+                    ) {
+                        // Default Project Location: Text Field [/Kodrix/]
+                        SettingItemContainer(label = "Default Project Location") {
+
+                            OutlinedTextField(
+                                value = state.defaultProjectLocation,
+                                onValueChange = { viewModel.setDefaultProjectLocation(it) },
+                                leadingIcon = {
+                                    Icon(imageVector = Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("project_location_input")
+                            )
+                        }
+
+                        // GitHub Integration: Connect Button + Status
+                        GitHubIntegrationCard(
+                            isConnected = state.isGithubConnected,
+                            username = state.githubUsername,
+                            isConnecting = state.isStartingOAuth,
+                            onConnect = { viewModel.startDeviceOAuth() },
+                            onDisconnect = { viewModel.disconnectGitHub() }
+                        )
+
+                        // Auto Commit on Build: Switch
+                        SettingSwitchRow(
+                            title = "Auto Commit on Build",
+                            subtitle = "Automatically commit generated source tree to GitHub repo",
+                            checked = state.autoCommitOnBuild,
+                            onCheckedChange = { viewModel.setAutoCommitOnBuild(it) },
+                            testTag = "auto_commit_switch"
+                        )
+
+                        // Export Project: Button [Export as .ZIP]
+                        SettingItemContainer(label = "Export Project") {
+                            Button(
+                                onClick = {
+                                    val file = viewModel.exportProjectAsZip()
+                                    if (file != null) {
+                                        Toast.makeText(context, "Exported: ${file.name}", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("export_project_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.Download, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Export as .ZIP", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        // Clear Cache: Button [Shows size]
+                        SettingItemContainer(label = "Cache Storage") {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.clearCache()
+                                    Toast.makeText(context, "Storage cache cleared", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("clear_cache_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = StatusFailed)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Clear Cache (${state.cacheSizeFormatted})", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+
+                // CATEGORY 5: Build & Deploy
+                if (selectedCategoryFilter in listOf("All", "Build & Deploy")) {
+                    CategorySection(
+                        title = "CATEGORY 5: Build & Deploy",
+                        icon = Icons.Default.Build
+                    ) {
+                        // Build on Save: Switch
+                        SettingSwitchRow(
+                            title = "Build on Save",
+                            subtitle = "Trigger target compilation pipeline when files are saved",
+                            checked = state.buildOnSave,
+                            onCheckedChange = { viewModel.setBuildOnSave(it) },
+                            testTag = "build_on_save_switch"
+                        )
+
+                        // Default Build Target: Chips [Web / Android APK / Design / Slides / Animation]
+                        SettingItemContainer(label = "Default Build Target") {
+                            KodrixChipGroup(
+                                options = listOf("Web", "Android APK", "Design", "Slides", "Animation"),
+                                selectedOption = state.defaultBuildTarget,
+                                onSelect = { viewModel.setDefaultBuildTarget(it) },
+                                modifier = Modifier.testTag("build_target_chips")
+                            )
+                        }
+
+                        // Web Build Runtime: Chip [Local Termux - Default]
+                        SettingItemContainer(label = "Web Build Runtime") {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = StatusCompleted.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, StatusCompleted.copy(alpha = 0.3f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Terminal,
+                                        contentDescription = null,
+                                        tint = StatusCompleted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Local Termux (Default)",
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = StatusCompleted
+                                    )
+                                }
+                            }
+                        }
+
+                        // Android Build Runtime: Chip [GitHub Actions - Default]
+                        SettingItemContainer(label = "Android Build Runtime") {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = StatusInProgress.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, StatusInProgress.copy(alpha = 0.3f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Build,
+                                        contentDescription = null,
+                                        tint = StatusInProgress,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "GitHub Actions (Default)",
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = StatusInProgress
+                                    )
+                                }
+                            }
+                        }
+
+                        // Auto-Generate Workflow File: Switch ON
+                        SettingSwitchRow(
+                            title = "Auto-Generate Workflow File",
+                            subtitle = "Automatically inject Android CI/CD release workflow in .github/workflows",
+                            checked = state.autoGenerateWorkflowFile,
+                            onCheckedChange = { viewModel.setAutoGenerateWorkflowFile(it) },
+                            testTag = "auto_generate_workflow_switch"
+                        )
+
+                        // View Build Logs: Button
+                        Button(
+                            onClick = { showLogsDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("view_build_logs_button")
+                        ) {
+                            Icon(imageVector = Icons.Default.Terminal, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("View Build Logs (${state.buildRecords.size} builds recorded)", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                // CATEGORY 6: Preview & Debug Logs
+                if (selectedCategoryFilter in listOf("All", "Preview")) {
+                    CategorySection(
+                        title = "CATEGORY 6: Preview & Debug Logs",
+                        icon = Icons.Default.Computer
+                    ) {
+                        // Preview Mode: Segmented Button [Split View / Full Screen / External Browser]
+                        SettingItemContainer(label = "Preview Mode") {
+                            KodrixSegmentedButton(
+                                items = listOf("Split View", "Full Screen", "External Browser"),
+                                selectedItem = state.previewMode,
+                                onSelect = { viewModel.setPreviewMode(it) },
+                                modifier = Modifier.testTag("preview_mode_segmented_button")
+                            )
+                        }
+
+                        // Auto-Refresh on Code Change: Switch
+                        SettingSwitchRow(
+                            title = "Auto-Refresh on Code Change",
+                            subtitle = "Live reload preview webview whenever new code is saved",
+                            checked = state.autoRefreshOnCodeChange,
+                            onCheckedChange = { viewModel.setAutoRefreshOnCodeChange(it) },
+                            testTag = "auto_refresh_switch"
+                        )
+
+                        // Device Preview: Chips [Mobile / Tablet / Desktop]
+                        SettingItemContainer(label = "Device Preview") {
+                            KodrixChipGroup(
+                                options = listOf("Mobile", "Tablet", "Desktop"),
+                                selectedOption = state.devicePreview,
+                                onSelect = { viewModel.setDevicePreview(it) },
+                                modifier = Modifier.testTag("device_preview_chips")
+                            )
+                        }
+
+                        // Dev Server Port: Default 5173
+                        SettingItemContainer(label = "Dev Server Port") {
+
+                            OutlinedTextField(
+                                value = state.devServerPort.toString(),
+                                onValueChange = { it.toIntOrNull()?.let { p -> viewModel.setDevServerPort(p) } },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("dev_server_port_input")
+                            )
+                        }
+
+                        // AI Auto-Fix on Error: Switch ON
+                        SettingSwitchRow(
+                            title = "AI Auto-Fix on Error",
+                            subtitle = "Automatically diagnose runtime crash logs with AI and propose fixes",
+                            checked = state.aiAutoFixOnError,
+                            onCheckedChange = { viewModel.setAiAutoFixOnError(it) },
+                            testTag = "ai_auto_fix_switch"
+                        )
+
+                        // Clear Logs on Reload: Switch
+                        SettingSwitchRow(
+                            title = "Clear Logs on Reload",
+                            subtitle = "Flush preview console logs when webview is refreshed",
+                            checked = state.clearLogsOnReload,
+                            onCheckedChange = { viewModel.setClearLogsOnReload(it) },
+                            testTag = "clear_logs_switch"
+                        )
+                    }
+                }
+
+                // CATEGORY 7: Terminal & Environment
+                if (selectedCategoryFilter in listOf("All", "Terminal")) {
+                    CategorySection(
+                        title = "CATEGORY 7: Terminal & Environment",
+                        icon = Icons.Default.Terminal
+                    ) {
+                        // Environment Type: Segmented [Local Termux / Cloud]
+                        SettingItemContainer(label = "Environment Type") {
+                            KodrixSegmentedButton(
+                                items = listOf("Local Termux", "Cloud"),
+                                selectedItem = state.environmentType,
+                                onSelect = { viewModel.setEnvironmentType(it) },
+                                modifier = Modifier.testTag("environment_type_segmented_button")
+                            )
+                        }
+
+                        // Node Version: Dropdown [Bundled Node 20 / System Node]
+                        SettingItemContainer(label = "Node Version") {
+                            KodrixDropdown(
+                                items = listOf("Bundled Node 20", "System Node"),
+                                selectedItem = state.nodeVersion,
+                                onSelect = { viewModel.setNodeVersion(it) },
+                                modifier = Modifier.testTag("node_version_dropdown")
+                            )
+                        }
+
+                        // Auto-Start Dev Server: Switch ON
+                        SettingSwitchRow(
+                            title = "Auto-Start Dev Server",
+                            subtitle = "Automatically boot Vite/Next.js dev daemon upon project load",
+                            checked = state.autoStartDevServer,
+                            onCheckedChange = { viewModel.setAutoStartDevServer(it) },
+                            testTag = "auto_start_dev_server_switch"
+                        )
+
+                        // Show Terminal: Switch ON/OFF
+                        SettingSwitchRow(
+                            title = "Show Terminal",
+                            subtitle = "Render bottom interactive terminal console in workspace",
+                            checked = state.showTerminal,
+                            onCheckedChange = { viewModel.setShowTerminal(it) },
+                            testTag = "show_terminal_switch"
+                        )
+
+                        // Locked Architecture Banner
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF1E1E1E)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = Color(0xFFF9AD94),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "LOCKED PIPELINE ENVIRONMENTS",
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFF9AD94)
+                                    )
+                                }
+                                Text(
+                                    text = "• Web = Local Termux Linux + Node + localhost WebView + auto logs to AI\n• APK = GitHub Actions workflow auto-generated + push = APK artifact",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 18.sp,
+                                    color = Color(0xFFE0E0E0)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal: Add Custom Provider Dialog
+    if (showAddCustomProviderDialog) {
+        var name by remember { mutableStateOf("") }
+        var baseUrl by remember { mutableStateOf("") }
+        var apiKey by remember { mutableStateOf("") }
+        var modelName by remember { mutableStateOf("") }
+        var providerType by remember { mutableStateOf("OpenAI Compatible") }
+        var typeDropdownExpanded by remember { mutableStateOf(false) }
+        val types = listOf("OpenAI Compatible", "Anthropic Compatible", "Gemini Compatible")
+
+        AlertDialog(
+            onDismissRequest = { showAddCustomProviderDialog = false },
+            title = {
+                Text(
+                    text = "Add Custom AI Provider",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = providerType,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Provider Type") },
+                            trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        androidx.compose.material3.Surface(
+                            modifier = Modifier.matchParentSize().clickable { typeDropdownExpanded = true },
+                            color = androidx.compose.ui.graphics.Color.Transparent
+                        ) {}
+                        DropdownMenu(
+                            expanded = typeDropdownExpanded,
+                            onDismissRequest = { typeDropdownExpanded = false }
+                        ) {
+                            types.forEach { type ->
+                                DropdownMenuItem(
+                                    text = { Text(type) },
+                                    onClick = {
+                                        providerType = type
+                                        typeDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Provider Name") },
+                        placeholder = { Text("e.g. Together AI") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        label = { Text("Base URL") },
+                        placeholder = { Text("https://api.together.xyz/v1") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it },
+                        label = { Text("API Key") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = modelName,
+                        onValueChange = { modelName = it },
+                        label = { Text("Model Name") },
+                        placeholder = { Text("e.g. meta-llama/Llama-3-70b") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (baseUrl.isNotBlank()) {
+                            viewModel.addCustomProvider(name, baseUrl, apiKey, modelName, providerType)
+                            showAddCustomProviderDialog = false
+                            Toast.makeText(context, "Custom provider added", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Add Provider")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddCustomProviderDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Modal: Build Logs Dialog
+    if (showLogsDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogsDialog = false },
+            title = {
+                Text(
+                    text = "Recent Build Logs",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                if (state.buildRecords.isEmpty()) {
+                    Text(
+                        text = "No builds recorded yet. Build an app to see pipeline telemetry and logs.",
+                        fontFamily = InterFontFamily,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        state.buildRecords.forEach { record ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = record.appName,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = record.status,
+                                            fontSize = 11.sp,
+                                            color = when (record.status.lowercase()) {
+                                                "completed" -> StatusCompleted
+                                                "failed" -> StatusFailed
+                                                else -> StatusInProgress
+                                            }
+                                        )
+                                    }
+                                    Text(
+                                        text = "${record.platform} • ${record.framework}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (!record.logSummary.isNullOrBlank()) {
+                                        Text(
+                                            text = record.logSummary,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showLogsDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Device Flow Authorization Dialog (if active)
+    if (state.deviceFlow != null) {
+        val flow = state.deviceFlow!!
+        var secondsRemaining by remember(flow.userCode) { mutableIntStateOf(flow.expiresIn) }
+
+        LaunchedEffect(flow.userCode) {
+            while (secondsRemaining > 0) {
+                kotlinx.coroutines.delay(1000)
+                secondsRemaining--
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelDeviceOAuth() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_github),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text("Authorize GitHub OAuth", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Enter this one-time code on GitHub to link your account:",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFF9AD94).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFFF9AD94)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = flow.userCode,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 4.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Code expires in ${secondsRemaining / 60}:${String.format(java.util.Locale.US, "%02d", secondsRemaining % 60)}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("GitHub Code", flow.userCode))
+                                Toast.makeText(context, "Code copied to clipboard", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Copy Code")
+                        }
+
+                        Button(
+                            onClick = {
+                                val url = flow.verificationUriComplete ?: flow.verificationUri
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open GitHub")
+                        }
+                    }
+
+                    if (flow.isPolling) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text("Waiting for authorization...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelDeviceOAuth() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// Subcomponents
+// -----------------------------------------------------------------------------------------
+
+@Composable
+private fun CategorySection(
+    title: String,
+    icon: ImageVector,
+    content: @Composable () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Text(
+                    text = title,
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingItemContainer(
+    label: String,
+    badge: String? = null,
+    content: @Composable () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (badge != null) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = badge,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+        content()
+    }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                text = title,
+                fontFamily = InterFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                fontFamily = InterFontFamily,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary
+            ),
+            modifier = Modifier.testTag(testTag)
+        )
+    }
+}
+
+@Composable
+private fun KodrixSegmentedButton(
+    items: List<String>,
+    selectedItem: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items.forEach { item ->
+                val isSelected = selectedItem.equals(item, ignoreCase = true)
+                Surface(
+                    onClick = { onSelect(item) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = item,
+                        fontFamily = InterFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(vertical = 7.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccentColorPicker(
+    selectedColor: String,
+    onSelectColor: (String) -> Unit
+) {
+    val colorMap = listOf(
+        "Peach" to Color(0xFFF9AD94),
+        "Blue" to Color(0xFF3B82F6),
+        "Purple" to Color(0xFF8B5CF6),
+        "Green" to Color(0xFF10B981)
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        colorMap.forEach { (name, color) ->
+            val isSelected = selectedColor.equals(name, ignoreCase = true)
+            Surface(
+                onClick = { onSelectColor(name) },
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) color else MaterialTheme.colorScheme.outline),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("accent_${name.lowercase()}")
+            ) {
+                Row(
+                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = name,
+                        fontFamily = InterFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KodrixDropdown(
+    items: List<String>,
+    selectedItem: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        Surface(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = selectedItem,
+                    fontFamily = InterFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            items.forEach { item ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = item,
+                            fontFamily = InterFontFamily,
+                            fontWeight = if (item == selectedItem) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        onSelect(item)
+                        expanded = false
+                    },
+                    trailingIcon = if (item == selectedItem) {
+                        { Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    } else null
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KodrixChipGroup(
+    options: List<String>,
+    selectedOption: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { option ->
+            val isSelected = selectedOption.equals(option, ignoreCase = true)
+            Surface(
+                onClick = { onSelect(option) },
+                shape = RoundedCornerShape(8.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+            ) {
+                Text(
+                    text = option,
+                    fontFamily = InterFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderManagementCard(
+    provider: ProviderConfig,
+    isVerifying: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
+    onUpdateApiKey: (String) -> Unit,
+    onUpdateModel: (String) -> Unit,
+    onUpdateBaseUrl: (String) -> Unit,
+    onVerify: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var apiKeyText by remember(provider.apiKey) { mutableStateOf(provider.apiKey) }
+    var baseUrlText by remember(provider.baseUrl) { mutableStateOf(provider.baseUrl) }
+    var showApiKey by remember { mutableStateOf(false) }
+
+    val isConnected = provider.apiKey.isNotBlank() || provider.isValid
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth().testTag("provider_card_${provider.id}")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            // Header Row: Status, Name, Switch
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.clickable { expanded = !expanded }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (isConnected) StatusCompleted else Color(0xFF9E9E9E))
+                    )
+                    Column {
+                        Text(
+                            text = provider.name,
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (isConnected) "Connected" else "Not Connected",
+                            fontSize = 11.sp,
+                            color = if (isConnected) StatusCompleted else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(
+                        onClick = { expanded = !expanded },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Expand",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Switch(
+                        checked = provider.isEnabled,
+                        onCheckedChange = onToggleEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primary
+                        ),
+                        modifier = Modifier.testTag("switch_${provider.id}")
+                    )
+                }
+            }
+
+            // Expandable Detail Section: API Key, Models, Base URL
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+
+                    // Base URL (if Compatible/Custom)
+                    if (provider.id.contains("custom") || provider.id.contains("compatible")) {
+
+                        OutlinedTextField(
+                            value = baseUrlText,
+                            onValueChange = {
+                                baseUrlText = it
+                                onUpdateBaseUrl(it)
+                            },
+                            label = { Text("Base URL", fontSize = 11.sp) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // API Key Field
+
+                    OutlinedTextField(
+                        value = apiKeyText,
+                        onValueChange = {
+                            apiKeyText = it
+                            onUpdateApiKey(it)
+                        },
+                        label = { Text("API Key", fontSize = 11.sp) },
+                        trailingIcon = {
+                            IconButton(onClick = { showApiKey = !showApiKey }) {
+                                Icon(
+                                    imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("apikey_${provider.id}")
+                    )
+
+                    // Models selector
+                    if (provider.availableModels.isNotEmpty()) {
+                        Text(
+                            text = "Model: ${provider.defaultModel}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        KodrixChipGroup(
+                            options = provider.availableModels,
+                            selectedOption = provider.defaultModel,
+                            onSelect = onUpdateModel
+                        )
+                    }
+
+                    // Verify button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = onVerify,
+                            enabled = !isVerifying,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            if (isVerifying) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Verifying...", fontSize = 12.sp)
+                            } else {
+                                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Verify Key", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GitHubIntegrationCard(
+    isConnected: Boolean,
+    username: String,
+    isConnecting: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth().testTag("github_integration_card")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_github),
+                    contentDescription = null,
+                    modifier = Modifier.size(26.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+                Column {
+                    Text(
+                        text = "GitHub Integration",
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = if (isConnected) "Connected as @$username" else "Not connected",
+                        fontSize = 11.sp,
+                        color = if (isConnected) StatusCompleted else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isConnected) {
+                OutlinedButton(
+                    onClick = onDisconnect,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusFailed)
+                ) {
+                    Text("Disconnect", fontSize = 12.sp)
+                }
+            } else {
+                Button(
+                    onClick = onConnect,
+                    enabled = !isConnecting,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.testTag("github_connect_button")
+                ) {
+                    if (isConnecting) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    } else {
+                        Text("Connect", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SegmentedThemeToggle(
+    selectedMode: String,
+    onSelect: (String) -> Unit
+) {
+    val options = listOf("Light", "Dark", "System")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        options.forEach { option ->
+            val isSelected = option.equals(selectedMode, ignoreCase = true)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onSelect(option) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = option,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}

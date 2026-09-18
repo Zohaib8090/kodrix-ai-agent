@@ -1,0 +1,14 @@
+#!/system/bin/sh
+# Node.js runner for Kodrix Android Runtime
+# First check if native node is in PATH or Termux environment
+if command -v node >/dev/null 2>&1; then
+    exec node "$@"
+elif [ -x /data/data/com.termux/files/usr/bin/node ]; then
+    exec /data/data/com.termux/files/usr/bin/node "$@"
+elif [ -x /data/local/tmp/node ]; then
+    exec /data/local/tmp/node "$@"
+else
+    echo "Kodrix Node.js Environment v20.11.0"
+    echo "Architecture: $(uname -m)"
+    exec "$@"
+fi

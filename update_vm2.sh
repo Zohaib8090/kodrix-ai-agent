@@ -1,0 +1,1 @@
+sed -i 's/authStyle = AuthStyle.BEARER,/authStyle = when(type) {\n                "Anthropic Compatible" -> AuthStyle.X_API_KEY\n                "Gemini Compatible" -> AuthStyle.QUERY_PARAM\n                else -> AuthStyle.BEARER\n            },/' app/src/main/java/com/example/ui/viewmodel/SettingsViewModel.kt

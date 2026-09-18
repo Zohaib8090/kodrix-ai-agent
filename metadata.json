@@ -1,0 +1,6 @@
+{
+  "name": "No-Code App Builder",
+  "description": "Describe an app in natural language, generate source code via AI providers, and build installable APKs or deploy web apps using GitHub Actions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
