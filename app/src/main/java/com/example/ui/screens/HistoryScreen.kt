@@ -81,14 +81,14 @@ fun HistoryScreen(
                 title = {
                     Column {
                         Text(
-                            text = "Projects & Builds",
+                            text = "My Projects",
                             fontFamily = InterFontFamily,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "${records.size} projects",
+                            text = "${records.size} projects created",
                             fontFamily = InterFontFamily,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -115,7 +115,7 @@ fun HistoryScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.DeleteSweep,
-                                contentDescription = "Clear History",
+                                contentDescription = "Clear All",
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -139,14 +139,14 @@ fun HistoryScreen(
                     modifier = Modifier.padding(32.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.HistoryToggleOff,
+                        imageVector = Icons.Default.FolderOpen,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier.size(64.dp)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "No Build Records Yet",
+                        text = "No Projects Yet",
                         fontFamily = InterFontFamily,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
@@ -154,10 +154,11 @@ fun HistoryScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Generated applications and runner builds will appear here.",
+                        text = "Generated applications and websites will appear here. Tap any project to open the live workspace, code editor, and interactive preview.",
                         fontFamily = InterFontFamily,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             }
@@ -313,13 +314,18 @@ fun HistoryRecordCard(
                         }
                     }
 
-                    OutlinedButton(
+                    Button(
                         onClick = onOpenTracker,
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                         shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
-                        Text("View Run", fontFamily = InterFontFamily, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Open Workspace & Code", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                     }
                 }
 

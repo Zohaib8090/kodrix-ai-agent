@@ -11,10 +11,23 @@ import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+data class ProjectFileNode(
+    val name: String,
+    val relativePath: String,
+    val isDirectory: Boolean,
+    val children: List<ProjectFileNode> = emptyList(),
+    val sizeBytes: Long = 0,
+    val lineCount: Int = 0
+)
+
 class ProjectRepository(private val context: Context) {
 
+    /**
+     * Main folder: <context.filesDir>/my_projects
+     * Contains subfolders for each created project.
+     */
     val rootProjectsDir: File
-        get() = File(context.filesDir, "kodrix-projects").apply { mkdirs() }
+        get() = File(context.filesDir, "my_projects").apply { mkdirs() }
 
     fun getProjectDir(projectName: String): File {
         val sanitized = projectName.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_").ifEmpty { "default_project" }
@@ -29,6 +42,48 @@ class ProjectRepository(private val context: Context) {
             target.writeText(file.content)
         }
         projectDir
+    }
+
+    suspend fun saveFile(projectDir: File, relativePath: String, content: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val target = File(projectDir, relativePath)
+            target.parentFile?.mkdirs()
+            target.writeText(content)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun createNewFolder(projectDir: File, relativePath: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val target = File(projectDir, relativePath)
+            target.mkdirs()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun deleteFile(projectDir: File, relativePath: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val target = File(projectDir, relativePath)
+            if (target.isDirectory) target.deleteRecursively() else target.delete()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun deleteProject(projectName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val dir = getProjectDir(projectName)
+            if (dir.exists()) {
+                dir.deleteRecursively()
+            } else {
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     suspend fun listProjects(): List<File> = withContext(Dispatchers.IO) {
@@ -48,6 +103,36 @@ class ProjectRepository(private val context: Context) {
             }
         }
         list
+    }
+
+    suspend fun getProjectDirectoryTree(projectDir: File): ProjectFileNode = withContext(Dispatchers.IO) {
+        fun buildTree(dir: File): ProjectFileNode {
+            val children = dir.listFiles()
+                ?.filter { !it.name.startsWith(".") }
+                ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+                ?.map { child ->
+                    if (child.isDirectory) {
+                        buildTree(child)
+                    } else {
+                        val lines = try { child.readLines().size } catch (_: Exception) { 0 }
+                        ProjectFileNode(
+                            name = child.name,
+                            relativePath = child.relativeTo(projectDir).path,
+                            isDirectory = false,
+                            sizeBytes = child.length(),
+                            lineCount = lines
+                        )
+                    }
+                } ?: emptyList()
+
+            return ProjectFileNode(
+                name = dir.name,
+                relativePath = if (dir == projectDir) "" else dir.relativeTo(projectDir).path,
+                isDirectory = true,
+                children = children
+            )
+        }
+        buildTree(projectDir)
     }
 
     /**

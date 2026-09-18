@@ -270,14 +270,14 @@ class PreferenceStorage(context: Context) {
 
     fun getDefaultModelsForProvider(providerId: String): List<String> {
         return when (providerId.lowercase()) {
-            "gemini" -> listOf("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro")
-            "openai" -> listOf("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini")
-            "anthropic", "claude" -> listOf("claude-fable-5-1", "claude-mythos-5-1", "claude-sonnet-5")
-            "groq" -> listOf("qwen/qwen3.6-27b", "llama/llama-4-scout-17b-16e-instruct", "llama/llama-4-maverick-17b-128e-instruct", "gpt-oss-120b", "deepseek-r1-distill-llama-70b")
-            "deepseek" -> listOf("deepseek-coder", "deepseek-chat")
+            "gemini" -> listOf("gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro")
+            "openai" -> listOf("gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo")
+            "anthropic", "claude" -> listOf("claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229")
+            "groq" -> listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
+            "deepseek" -> listOf("deepseek-chat", "deepseek-coder")
             "openrouter" -> listOf("anthropic/claude-3.5-sonnet", "openai/gpt-4o", "meta-llama/llama-3.3-70b-instruct")
             "local_tunnel" -> listOf("llama3:latest", "codellama:latest", "qwen2.5-coder:latest")
-            else -> listOf("deepseek/deepseek-v3", "meta-llama/llama-4-maverick", "qwen/qwen3.6-27b")
+            else -> listOf("deepseek-chat", "gpt-4o", "gemini-2.5-flash")
         }
     }
 
@@ -295,7 +295,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = defaultGeminiKey,
                 baseUrl = "https://generativelanguage.googleapis.com",
                 authStyle = AuthStyle.QUERY_PARAM,
-                defaultModel = "gemini-3.8-flash",
+                defaultModel = "gemini-2.5-flash",
                 isValid = defaultGeminiKey.isNotBlank(),
                 statusMessage = if (defaultGeminiKey.isNotBlank()) "Connected (AI Studio Secret)" else "Requires API key",
                 supportsVision = true,
@@ -309,7 +309,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = "",
                 baseUrl = "https://api.openai.com/v1",
                 authStyle = AuthStyle.BEARER,
-                defaultModel = "gpt-5.6-sol",
+                defaultModel = "gpt-4o",
                 supportsVision = true,
                 isEnabled = true,
                 availableModels = getDefaultModelsForProvider("openai")
@@ -320,7 +320,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = "",
                 baseUrl = "https://api.anthropic.com/v1",
                 authStyle = AuthStyle.X_API_KEY,
-                defaultModel = "claude-fable-5-1",
+                defaultModel = "claude-3-5-sonnet-20241022",
                 supportsVision = true,
                 isEnabled = true,
                 availableModels = getDefaultModelsForProvider("anthropic")
@@ -331,7 +331,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = "",
                 baseUrl = "https://api.groq.com/openai/v1",
                 authStyle = AuthStyle.BEARER,
-                defaultModel = "qwen/qwen3.6-27b",
+                defaultModel = "llama-3.3-70b-versatile",
                 supportsVision = false,
                 isEnabled = true,
                 availableModels = getDefaultModelsForProvider("groq")
@@ -342,7 +342,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = "",
                 baseUrl = "https://api.together.xyz/v1",
                 authStyle = AuthStyle.BEARER,
-                defaultModel = "deepseek/deepseek-v3",
+                defaultModel = "deepseek-ai/DeepSeek-V3",
                 supportsVision = false,
                 isEnabled = true,
                 availableModels = getDefaultModelsForProvider("custom_openai")

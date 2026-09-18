@@ -9,25 +9,27 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.ui.screens.BuildTrackerScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.OnboardingScreen
+import com.example.ui.screens.ProjectWorkspaceScreen
 import com.example.ui.screens.SettingsScreen
-import com.example.ui.viewmodel.BuildTrackerViewModel
 import com.example.ui.viewmodel.DashboardViewModel
 import com.example.ui.viewmodel.HistoryViewModel
 import com.example.ui.viewmodel.OnboardingViewModel
+import com.example.ui.viewmodel.ProjectWorkspaceViewModel
 import com.example.ui.viewmodel.SettingsViewModel
 
 object Routes {
     const val ONBOARDING = "onboarding"
     const val DASHBOARD = "dashboard"
+    const val WORKSPACE = "workspace/{projectId}"
     const val TRACKER = "tracker/{buildId}"
     const val HISTORY = "history"
     const val SETTINGS = "settings"
 
-    fun tracker(buildId: String) = "tracker/$buildId"
+    fun workspace(projectId: String) = "workspace/$projectId"
+    fun tracker(buildId: String) = "workspace/$buildId"
 }
 
 @Composable
@@ -63,7 +65,7 @@ fun AppNavigation(
             DashboardScreen(
                 viewModel = vm,
                 onNavigateToTracker = { buildId ->
-                    navController.navigate(Routes.tracker(buildId))
+                    navController.navigate(Routes.workspace(buildId))
                 },
                 onNavigateToHistory = {
                     navController.navigate(Routes.HISTORY)
@@ -86,13 +88,28 @@ fun AppNavigation(
         }
 
         composable(
+            route = Routes.WORKSPACE,
+            arguments = listOf(navArgument("projectId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val projectId = backStackEntry.arguments?.getString("projectId") ?: ""
+            val vm: ProjectWorkspaceViewModel = viewModel()
+            ProjectWorkspaceScreen(
+                projectId = projectId,
+                viewModel = vm,
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(
             route = Routes.TRACKER,
             arguments = listOf(navArgument("buildId") { type = NavType.StringType })
         ) { backStackEntry ->
             val buildId = backStackEntry.arguments?.getString("buildId") ?: ""
-            val vm: BuildTrackerViewModel = viewModel()
-            BuildTrackerScreen(
-                buildId = buildId,
+            val vm: ProjectWorkspaceViewModel = viewModel()
+            ProjectWorkspaceScreen(
+                projectId = buildId,
                 viewModel = vm,
                 onNavigateBack = {
                     navController.popBackStack()
@@ -108,7 +125,7 @@ fun AppNavigation(
                     navController.popBackStack()
                 },
                 onNavigateToTracker = { buildId ->
-                    navController.navigate(Routes.tracker(buildId))
+                    navController.navigate(Routes.workspace(buildId))
                 }
             )
         }

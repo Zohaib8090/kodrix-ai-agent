@@ -473,6 +473,7 @@ fun PhonePreviewFrame(
 fun InAppWebPreview(
     htmlContent: String? = null,
     targetUrl: String? = null,
+    baseUrl: String? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -491,11 +492,17 @@ fun InAppWebPreview(
                     settings.domStorageEnabled = true
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = true
+                    try {
+                        settings.allowFileAccessFromFileURLs = true
+                        settings.allowUniversalAccessFromFileURLs = true
+                    } catch (_: Exception) {}
 
                     if (!targetUrl.isNullOrBlank()) {
                         loadUrl(targetUrl)
                     } else if (!htmlContent.isNullOrBlank()) {
-                        loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                        loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
                     }
                 }
             },
@@ -503,7 +510,7 @@ fun InAppWebPreview(
                 if (!targetUrl.isNullOrBlank()) {
                     webView.loadUrl(targetUrl)
                 } else if (!htmlContent.isNullOrBlank()) {
-                    webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    webView.loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
                 }
             },
             modifier = Modifier.fillMaxSize()
