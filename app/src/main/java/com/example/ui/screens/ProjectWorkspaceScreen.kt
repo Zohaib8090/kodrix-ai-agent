@@ -54,7 +54,8 @@ import com.example.ui.viewmodel.WorkspaceChatMessage
 fun ProjectWorkspaceScreen(
     projectId: String,
     viewModel: ProjectWorkspaceViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -198,19 +199,6 @@ fun ProjectWorkspaceScreen(
                         }
                     }
 
-                    if (state.platform.equals("WEB", ignoreCase = true)) {
-                        IconButton(
-                            onClick = { viewModel.openInBrowser(context) },
-                            modifier = Modifier.testTag("open_browser_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.OpenInBrowser,
-                                contentDescription = "Open in External Browser",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
                     if (state.activeTab == WorkspaceBottomNav.CODE && state.hasUnsavedChanges) {
                         IconButton(
                             onClick = { viewModel.saveCurrentFile() },
@@ -225,12 +213,12 @@ fun ProjectWorkspaceScreen(
                     }
 
                     IconButton(
-                        onClick = { viewModel.exportAsZip(context) },
-                        modifier = Modifier.testTag("export_zip_button")
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.testTag("workspace_settings_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = "Export ZIP",
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }

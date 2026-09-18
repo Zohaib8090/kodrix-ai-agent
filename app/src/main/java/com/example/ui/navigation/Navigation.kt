@@ -98,6 +98,9 @@ fun AppNavigation(
                 viewModel = vm,
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Routes.SETTINGS)
                 }
             )
         }
@@ -113,6 +116,9 @@ fun AppNavigation(
                 viewModel = vm,
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Routes.SETTINGS)
                 }
             )
         }
