@@ -3,6 +3,8 @@ package com.example.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,9 +30,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.example.data.local.BuildRecord
 import com.example.ui.common.BuildStatusChip
@@ -49,6 +54,9 @@ fun HistoryScreen(
     onNavigateToTracker: (String) -> Unit
 ) {
     val records by viewModel.historyRecords.collectAsState()
+    val isProcessing by viewModel.isProcessing.collectAsState()
+    val processMessage by viewModel.processMessage.collectAsState()
+    val processError by viewModel.processError.collectAsState()
     val context = LocalContext.current
 
     var showClearDialog by remember { mutableStateOf(false) }
@@ -56,6 +64,195 @@ fun HistoryScreen(
     var renameDialogRecord by remember { mutableStateOf<BuildRecord?>(null) }
     var deleteDialogRecord by remember { mutableStateOf<BuildRecord?>(null) }
     var renameInputText by remember { mutableStateOf("") }
+
+    // Clone GitHub Dialog state
+    var showCloneDialog by remember { mutableStateOf(false) }
+    var githubRepoInput by remember { mutableStateOf("") }
+    var githubBranchInput by remember { mutableStateOf("") }
+    var githubTokenInput by remember { mutableStateOf("") }
+
+    // ZIP file picker launcher
+    val zipPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.importZipProject(it, context) { recordId ->
+                onNavigateToTracker(recordId)
+            }
+        }
+    }
+
+    // Processing Overlay Dialog
+    if (isProcessing) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                modifier = Modifier.widthIn(min = 280.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(44.dp),
+                        strokeWidth = 3.5.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = processMessage ?: "Processing project...",
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "This may take a moment depending on the project size",
+                        fontFamily = InterFontFamily,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+
+    // Process Error Dialog
+    if (processError != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearProcessError() },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Operation Failed", fontFamily = InterFontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Text(
+                    text = processError ?: "An unexpected error occurred.",
+                    fontFamily = InterFontFamily,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.clearProcessError() },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    // Clone from GitHub Dialog
+    if (showCloneDialog) {
+        AlertDialog(
+            onDismissRequest = { showCloneDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CloudDownload,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Clone from GitHub", fontFamily = InterFontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Enter a GitHub repository URL or slug to clone and extract into your workspace.",
+                        fontFamily = InterFontFamily,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedTextField(
+                        value = githubRepoInput,
+                        onValueChange = { githubRepoInput = it },
+                        label = { Text("Repository (e.g. owner/repo or https://...)") },
+                        placeholder = { Text("e.g. facebook/react or torvalds/linux") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("github_repo_url_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = githubBranchInput,
+                        onValueChange = { githubBranchInput = it },
+                        label = { Text("Branch (Optional, default main/master)") },
+                        placeholder = { Text("main") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = githubTokenInput,
+                        onValueChange = { githubTokenInput = it },
+                        label = { Text("GitHub Token (Optional for private repos)") },
+                        placeholder = { Text("ghp_...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (githubRepoInput.isNotBlank()) {
+                            val repo = githubRepoInput.trim()
+                            val branch = githubBranchInput.trim().ifEmpty { null }
+                            val token = githubTokenInput.trim().ifEmpty { null }
+                            showCloneDialog = false
+                            viewModel.cloneGitHubRepo(repo, branch, token) { recordId ->
+                                onNavigateToTracker(recordId)
+                            }
+                        }
+                    },
+                    enabled = githubRepoInput.isNotBlank(),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("confirm_clone_github_button")
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Clone & Open")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloneDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     // Clear All History Dialog
     if (showClearDialog) {
@@ -319,6 +516,39 @@ fun HistoryScreen(
                     }
                 },
                 actions = {
+                    // Upload ZIP Project button
+                    IconButton(
+                        onClick = {
+                            zipPickerLauncher.launch(
+                                arrayOf(
+                                    "application/zip",
+                                    "application/x-zip-compressed",
+                                    "application/octet-stream",
+                                    "*/*"
+                                )
+                            )
+                        },
+                        modifier = Modifier.testTag("upload_zip_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = "Upload ZIP",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    // Clone from GitHub button
+                    IconButton(
+                        onClick = { showCloneDialog = true },
+                        modifier = Modifier.testTag("clone_github_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = "Clone GitHub",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
                     if (records.isNotEmpty()) {
                         IconButton(
                             onClick = { showClearDialog = true },
@@ -327,7 +557,7 @@ fun HistoryScreen(
                             Icon(
                                 imageVector = Icons.Default.DeleteSweep,
                                 contentDescription = "Clear All",
-                                tint = MaterialTheme.colorScheme.onSurface
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -365,12 +595,46 @@ fun HistoryScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Generated applications and websites will appear here. Tap any project to open the live workspace, or hold a project to rename or delete it.",
+                        text = "Upload a project ZIP file, clone an existing GitHub repository, or generate a new app from the Dashboard.",
                         fontFamily = InterFontFamily,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = TextAlign.Center
                     )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                zipPickerLauncher.launch(
+                                    arrayOf(
+                                        "application/zip",
+                                        "application/x-zip-compressed",
+                                        "application/octet-stream",
+                                        "*/*"
+                                    )
+                                )
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Upload ZIP", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { showCloneDialog = true },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Clone GitHub", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
         } else {

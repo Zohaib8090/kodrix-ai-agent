@@ -351,6 +351,7 @@ fun ProjectWorkspaceScreen(
                         AiChatTab(
                             messages = state.chatMessages,
                             isAiRefining = state.isAiRefining,
+                            isGenerating = state.isGenerating,
                             isOnboarding = state.isOnboarding,
                             isOnboardingThinking = state.isOnboardingThinking,
                             activeProvider = state.activeProviderName,
@@ -362,6 +363,9 @@ fun ProjectWorkspaceScreen(
                             },
                             onSendOnboardingReply = { reply ->
                                 viewModel.sendOnboardingReply(reply)
+                            },
+                            onStopResponse = {
+                                viewModel.stopAiResponse()
                             }
                         )
                     }
@@ -411,12 +415,14 @@ fun ProjectWorkspaceScreen(
 private fun AiChatTab(
     messages: List<WorkspaceChatMessage>,
     isAiRefining: Boolean,
+    isGenerating: Boolean = false,
     isOnboarding: Boolean = false,
     isOnboardingThinking: Boolean = false,
     activeProvider: String,
     onSendMessage: (String) -> Unit,
     onRetryPrompt: (String) -> Unit,
-    onSendOnboardingReply: (String) -> Unit = {}
+    onSendOnboardingReply: (String) -> Unit = {},
+    onStopResponse: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var promptInput by remember { mutableStateOf("") }
@@ -656,11 +662,13 @@ private fun AiChatTab(
                 }
             }
 
-            if (isAiRefining) {
+            val isAiActive = isAiRefining || isOnboardingThinking || isGenerating
+            if (isAiActive) {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Start
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -678,11 +686,39 @@ private fun AiChatTab(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "$activeProvider is coding your updates...",
+                                    text = if (isOnboardingThinking) "Kodrix is analyzing requirements..." else if (isGenerating) "AI is generating code files..." else "$activeProvider is coding your updates...",
                                     fontFamily = InterFontFamily,
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onStopResponse() }
+                                        .padding(1.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Stop,
+                                            contentDescription = "Stop",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Stop",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -701,8 +737,14 @@ private fun AiChatTab(
             promptSuggestions.forEach { suggestion ->
                 SuggestionChip(
                     onClick = {
-                        if (!isAiRefining) {
-                            onSendMessage(suggestion.removePrefix("✨ ").removePrefix("📱 ").removePrefix("🎨 ").removePrefix("⚡ "))
+                        val isAiActiveNow = isAiRefining || isOnboardingThinking || isGenerating
+                        if (!isAiActiveNow) {
+                            val cleanPrompt = suggestion.removePrefix("✨ ").removePrefix("📱 ").removePrefix("🎨 ").removePrefix("⚡ ")
+                            if (isOnboarding) {
+                                onSendOnboardingReply(cleanPrompt)
+                            } else {
+                                onSendMessage(cleanPrompt)
+                            }
                         }
                     },
                     label = { Text(suggestion, fontSize = 11.sp) }
@@ -727,7 +769,7 @@ private fun AiChatTab(
                     onValueChange = { promptInput = it },
                     placeholder = {
                         Text(
-                            "Ask AI to code changes or add features...",
+                            if (isOnboarding) "Reply to Kodrix..." else "Ask AI to code changes or add features...",
                             fontFamily = InterFontFamily,
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
@@ -754,41 +796,65 @@ private fun AiChatTab(
                     maxLines = 3
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                val isRefineSendEnabled = !isAiRefining && promptInput.isNotBlank()
-                IconButton(
-                    onClick = {
-                        if (promptInput.isNotBlank()) {
-                            val text = promptInput.trim()
-                            promptInput = ""
-                            onSendMessage(text)
-                        }
-                    },
-                    enabled = isRefineSendEnabled,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .shadow(
-                            elevation = if (isRefineSendEnabled) 4.dp else 1.dp,
-                            shape = CircleShape,
-                            spotColor = if (isRefineSendEnabled) LandingPeach.copy(alpha = 0.6f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+
+                val isAiActiveCurrent = isAiRefining || isOnboardingThinking || isGenerating
+                if (isAiActiveCurrent) {
+                    IconButton(
+                        onClick = onStopResponse,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .shadow(4.dp, CircleShape, spotColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error)
+                            .testTag("ai_stop_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Stop Response",
+                            tint = MaterialTheme.colorScheme.onError
                         )
-                        .clip(CircleShape)
-                        .background(
-                            if (isRefineSendEnabled) LandingPeach
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    }
+                } else {
+                    val isSendEnabled = promptInput.isNotBlank()
+                    IconButton(
+                        onClick = {
+                            if (promptInput.isNotBlank()) {
+                                val text = promptInput.trim()
+                                promptInput = ""
+                                if (isOnboarding) {
+                                    onSendOnboardingReply(text)
+                                } else {
+                                    onSendMessage(text)
+                                }
+                            }
+                        },
+                        enabled = isSendEnabled,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .shadow(
+                                elevation = if (isSendEnabled) 4.dp else 1.dp,
+                                shape = CircleShape,
+                                spotColor = if (isSendEnabled) LandingPeach.copy(alpha = 0.6f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                            )
+                            .clip(CircleShape)
+                            .background(
+                                if (isSendEnabled) LandingPeach
+                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                            )
+                            .border(
+                                width = 1.5.dp,
+                                color = if (isSendEnabled) Color(0xFFFFE5DD) else MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
+                                shape = CircleShape
+                            )
+                            .testTag("ai_refine_send_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            tint = if (isSendEnabled) Color(0xFF1E1E1E)
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
                         )
-                        .border(
-                            width = 1.5.dp,
-                            color = if (isRefineSendEnabled) Color(0xFFFFE5DD) else MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
-                            shape = CircleShape
-                        )
-                        .testTag("ai_refine_send_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (isRefineSendEnabled) Color(0xFF1E1E1E)
-                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-                    )
+                    }
                 }
             }
         }

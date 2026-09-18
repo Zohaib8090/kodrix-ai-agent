@@ -170,4 +170,105 @@ class ProjectRepository(private val context: Context) {
         }
         return zipFile
     }
+
+    suspend fun importProjectFromZipStream(
+        inputStream: java.io.InputStream,
+        desiredProjectName: String
+    ): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val projectDir = getProjectDir(desiredProjectName)
+            projectDir.mkdirs()
+
+            val tempZip = File(context.cacheDir, "temp_import_${System.currentTimeMillis()}.zip")
+            tempZip.outputStream().use { out ->
+                inputStream.copyTo(out)
+            }
+
+            java.util.zip.ZipInputStream(tempZip.inputStream()).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    val entryName = entry.name
+                    if (!entryName.startsWith("__MACOSX") && !entryName.contains("../")) {
+                        // Strip leading root directory if GitHub zipball format (e.g. repo-name-hash/file)
+                        val cleanPath = entryName.replaceFirst(Regex("^[^/]+/(?=.+)"), "")
+                        val targetFile = File(projectDir, if (cleanPath.isBlank()) entryName else cleanPath)
+                        if (entry.isDirectory) {
+                            targetFile.mkdirs()
+                        } else {
+                            targetFile.parentFile?.mkdirs()
+                            targetFile.outputStream().use { fos ->
+                                zis.copyTo(fos)
+                            }
+                        }
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+            tempZip.delete()
+            Result.success(projectDir)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun cloneGitHubRepo(
+        repoUrlOrSlug: String,
+        branch: String? = null,
+        authToken: String? = null
+    ): Result<Pair<File, String>> = withContext(Dispatchers.IO) {
+        try {
+            val cleaned = repoUrlOrSlug.trim()
+                .removePrefix("https://github.com/")
+                .removePrefix("http://github.com/")
+                .removePrefix("github.com/")
+                .removeSuffix(".git")
+                .trim('/')
+
+            val parts = cleaned.split('/')
+            if (parts.size < 2) {
+                return@withContext Result.failure(Exception("Invalid GitHub repository format. Use 'owner/repo' or a full GitHub repository URL."))
+            }
+
+            val owner = parts[0]
+            val repo = parts[1]
+            val projectName = repo
+
+            val client = com.example.data.remote.ApiClient.createAiHttpClient(60)
+            val branchParam = branch?.trim()?.ifEmpty { null }
+            val downloadUrl = if (branchParam != null) {
+                "https://api.github.com/repos/$owner/$repo/zipball/$branchParam"
+            } else {
+                "https://api.github.com/repos/$owner/$repo/zipball"
+            }
+
+            val requestBuilder = okhttp3.Request.Builder()
+                .url(downloadUrl)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "Kodrix-AI-Agent")
+
+            if (!authToken.isNullOrBlank()) {
+                requestBuilder.header("Authorization", "Bearer ${authToken.trim()}")
+            }
+
+            val response = client.newCall(requestBuilder.build()).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(
+                    Exception("Failed to download repository ($owner/$repo): HTTP ${response.code} ${response.message}")
+                )
+            }
+
+            val bodyStream = response.body?.byteStream()
+                ?: return@withContext Result.failure(Exception("Empty response received from GitHub"))
+
+            val importResult = importProjectFromZipStream(bodyStream, projectName)
+            if (importResult.isSuccess) {
+                Result.success(Pair(importResult.getOrThrow(), projectName))
+            } else {
+                Result.failure(importResult.exceptionOrNull() ?: Exception("Failed to extract repository archive."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

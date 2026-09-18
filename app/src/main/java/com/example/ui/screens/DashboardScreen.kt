@@ -140,17 +140,36 @@ fun DashboardScreen(
     onNavigateToSettings: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val isProcessing by viewModel.isProcessing.collectAsState()
+    val processMessage by viewModel.processMessage.collectAsState()
+    val processError by viewModel.processError.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var promptText by remember { mutableStateOf(state.prompt) }
     var selectedCategoryId by remember { mutableStateOf("website") }
     var promptSetIndex by remember { mutableIntStateOf(0) }
     var refreshRotation by remember { mutableFloatStateOf(0f) }
-    // showOptionsSheet is kept in state but no longer triggered by the "+" button
-    // (Build Settings sheet is hidden for now — will be relocated to another menu)
-    var showOptionsSheet by remember { mutableStateOf(false) }
+    var showPlusMenuSheet by remember { mutableStateOf(false) }
     var showChatSheet by remember { mutableStateOf(false) }
 
-    // File attachment state for the "+" upload button
+    // Clone GitHub Dialog state
+    var showCloneDialog by remember { mutableStateOf(false) }
+    var githubRepoInput by remember { mutableStateOf("") }
+    var githubBranchInput by remember { mutableStateOf("") }
+    var githubTokenInput by remember { mutableStateOf("") }
+
+    // ZIP file picker launcher for uploading full project
+    val zipPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.importZipProject(it, context) { recordId ->
+                onNavigateToTracker(recordId)
+            }
+        }
+    }
+
+    // File attachment state for attaching documents/images to prompt
     var attachedFiles by remember { mutableStateOf<List<Uri>>(emptyList()) }
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -158,6 +177,175 @@ fun DashboardScreen(
         if (uris.isNotEmpty()) {
             attachedFiles = (attachedFiles + uris).distinct()
         }
+    }
+
+    // Processing Overlay Dialog
+    if (isProcessing) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = {},
+            properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp,
+                modifier = Modifier.widthIn(min = 280.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(44.dp),
+                        strokeWidth = 3.5.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = processMessage ?: "Processing project...",
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Extracting files and setting up your workspace",
+                        fontFamily = InterFontFamily,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+
+    // Process Error Dialog
+    if (processError != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearProcessError() },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Operation Failed", fontFamily = InterFontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Text(
+                    text = processError ?: "An unexpected error occurred.",
+                    fontFamily = InterFontFamily,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.clearProcessError() },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    // Clone from GitHub Dialog
+    if (showCloneDialog) {
+        AlertDialog(
+            onDismissRequest = { showCloneDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Clone from GitHub", fontFamily = InterFontFamily, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Enter a GitHub repository URL or slug to clone and extract into your workspace.",
+                        fontFamily = InterFontFamily,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedTextField(
+                        value = githubRepoInput,
+                        onValueChange = { githubRepoInput = it },
+                        label = { Text("Repository (e.g. owner/repo or https://...)") },
+                        placeholder = { Text("e.g. facebook/react or torvalds/linux") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("dashboard_github_repo_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = githubBranchInput,
+                        onValueChange = { githubBranchInput = it },
+                        label = { Text("Branch (Optional, default main/master)") },
+                        placeholder = { Text("main") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = githubTokenInput,
+                        onValueChange = { githubTokenInput = it },
+                        label = { Text("GitHub Token (Optional for private repos)") },
+                        placeholder = { Text("ghp_...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (githubRepoInput.isNotBlank()) {
+                            val repo = githubRepoInput.trim()
+                            val branch = githubBranchInput.trim().ifEmpty { null }
+                            val token = githubTokenInput.trim().ifEmpty { null }
+                            showCloneDialog = false
+                            viewModel.cloneGitHubRepo(repo, branch, token) { recordId ->
+                                onNavigateToTracker(recordId)
+                            }
+                        }
+                    },
+                    enabled = githubRepoInput.isNotBlank(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Clone & Open")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloneDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Synchronize if external change
@@ -283,8 +471,8 @@ fun DashboardScreen(
                             promptText = it
                             viewModel.onPromptChanged(it)
                         },
-                        // "+" now opens file/folder upload picker (zip, any format)
-                        onOpenOptions = { filePicker.launch("*/*") },
+                        // "+" opens options sheet for Upload Project ZIP, Clone GitHub, or Attach Files
+                        onOpenOptions = { showPlusMenuSheet = true },
                         onSubmit = {
                             if (promptText.isNotBlank() && !state.isLaunchingBuild) {
                                 viewModel.onPromptChanged(promptText)
@@ -368,22 +556,82 @@ fun DashboardScreen(
         }
     }
 
-    // NOTE: AdvancedOptionsBottomSheet is temporarily hidden from the "+" button.
-    // Build Settings & AI Configuration will be relocated to another menu in a future update.
-    // The code below is kept intact — do NOT delete it.
-    /*
-    if (showOptionsSheet) {
-        AdvancedOptionsBottomSheet(
-            state = state,
-            viewModel = viewModel,
-            onOpenAiChat = {
-                showOptionsSheet = false
-                showChatSheet = true
-            },
-            onDismiss = { showOptionsSheet = false }
-        )
+    // Plus Menu Bottom Sheet
+    if (showPlusMenuSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlusMenuSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp, top = 8.dp)
+            ) {
+                Text(
+                    text = "Project & Context Options",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                // Option 1: Upload Project ZIP
+                ListItem(
+                    headlineContent = { Text("Upload Project (.ZIP)", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+                    supportingContent = { Text("Import existing source files directly into workspace", fontFamily = InterFontFamily, fontSize = 11.sp) },
+                    leadingContent = {
+                        Icon(Icons.Outlined.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            showPlusMenuSheet = false
+                            zipPickerLauncher.launch(
+                                arrayOf(
+                                    "application/zip",
+                                    "application/x-zip-compressed",
+                                    "application/octet-stream",
+                                    "*/*"
+                                )
+                            )
+                        }
+                )
+
+                // Option 2: Clone from GitHub
+                ListItem(
+                    headlineContent = { Text("Clone from GitHub", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+                    supportingContent = { Text("Download and open any GitHub repository in workspace", fontFamily = InterFontFamily, fontSize = 11.sp) },
+                    leadingContent = {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            showPlusMenuSheet = false
+                            showCloneDialog = true
+                        }
+                )
+
+                // Option 3: Attach Files to Current Prompt
+                ListItem(
+                    headlineContent = { Text("Attach Files to Prompt", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+                    supportingContent = { Text("Attach reference mockups, specs, or images to prompt", fontFamily = InterFontFamily, fontSize = 11.sp) },
+                    leadingContent = {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            showPlusMenuSheet = false
+                            filePicker.launch("*/*")
+                        }
+                )
+            }
+        }
     }
-    */
 
     // AI App Architect Chat Bottom Sheet
     if (showChatSheet) {

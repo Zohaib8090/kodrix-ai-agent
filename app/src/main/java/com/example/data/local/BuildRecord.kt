@@ -10,14 +10,14 @@ data class BuildRecord(
     val platform: String, // "ANDROID" or "WEB"
     val framework: String, // "NATIVE", "REACT_VITE", "NEXT_JS", etc.
     val prompt: String,
-    val blueprintId: String,
-    val blueprintTitle: String,
-    val codegenProviderId: String,
-    val fixProviderId: String,
-    val featuresJson: String, // Comma separated or JSON
-    val status: String, // "Queued", "InProgress", "Completed", "Failed"
-    val currentStep: String,
-    val timestamp: Long,
+    val blueprintId: String = "custom",
+    val blueprintTitle: String = "Custom Project",
+    val codegenProviderId: String = "gemini",
+    val fixProviderId: String = "gemini",
+    val featuresJson: String = "", // Comma separated or JSON
+    val status: String = "Completed", // "Queued", "InProgress", "Completed", "Failed"
+    val currentStep: String = "Finished",
+    val timestamp: Long = System.currentTimeMillis(),
     val runId: Long? = null,
     val artifactType: String? = null, // "apk" or "web"
     val localApkPath: String? = null,

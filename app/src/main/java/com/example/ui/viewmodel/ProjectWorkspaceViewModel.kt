@@ -22,6 +22,7 @@ import com.example.data.services.ProjectFileNode
 import com.example.data.services.ProjectRepository
 import com.example.util.NotificationHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,12 +80,33 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
     private val aiRepo = AiProviderRepository(prefs)
     private val projectRepo = ProjectRepository(application)
     private val nodeService = NodeService(application)
+    private var activeAiJob: Job? = null
 
     private val _state = MutableStateFlow(ProjectWorkspaceUiState())
     val state: StateFlow<ProjectWorkspaceUiState> = _state.asStateFlow()
 
+    fun stopAiResponse() {
+        activeAiJob?.cancel()
+        activeAiJob = null
+        val currentRecord = _state.value.record
+        if (currentRecord != null && _state.value.isGenerating) {
+            viewModelScope.launch {
+                val stopped = currentRecord.copy(status = "Idle", currentStep = "Stopped by user")
+                db.buildRecordDao().update(stopped)
+            }
+        }
+        _state.value = _state.value.copy(
+            isGenerating = false,
+            isAiRefining = false,
+            isOnboardingThinking = false,
+            statusText = "Response stopped",
+            notification = "Stopped AI response"
+        )
+    }
+
     fun loadProject(projectId: String) {
-        viewModelScope.launch {
+        activeAiJob?.cancel()
+        activeAiJob = viewModelScope.launch {
             val record = db.buildRecordDao().getRecordDirect(projectId)
             if (record == null) {
                 _state.value = _state.value.copy(
@@ -157,7 +179,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         if (trimmed.isBlank()) return
         val currentRecord = _state.value.record
         if (currentRecord != null && _state.value.files.isEmpty()) {
-            viewModelScope.launch {
+            activeAiJob?.cancel()
+            activeAiJob = viewModelScope.launch {
                 val projectDir = projectRepo.getProjectDir(currentRecord.appName)
                 generateProjectCode(currentRecord.copy(prompt = trimmed), projectDir)
             }
@@ -270,7 +293,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             isOnboardingThinking = true
         )
 
-        viewModelScope.launch {
+        activeAiJob?.cancel()
+        activeAiJob = viewModelScope.launch {
             // Build conversation history for AI context
             val historyText = updatedConversation.joinToString("\n") {
                 "${if (it.sender == "USER") "User" else "Kodrix"}: ${it.message}"
@@ -603,7 +627,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         val currentFiles = _state.value.files
         val activePid = _state.value.activeProviderId
 
-        viewModelScope.launch {
+        activeAiJob?.cancel()
+        activeAiJob = viewModelScope.launch {
             val userMsg = WorkspaceChatMessage(sender = "USER", message = userInstruction)
             _state.value = _state.value.copy(
                 chatMessages = _state.value.chatMessages + userMsg,
