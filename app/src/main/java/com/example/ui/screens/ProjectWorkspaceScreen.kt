@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +14,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -274,7 +276,27 @@ fun ProjectWorkspaceScreen(
                     modifier = Modifier.testTag("tab_code")
                 )
 
-                // Option 3: Preview
+                // Option 3: Terminal (Linux / Termux Environment)
+                NavigationBarItem(
+                    selected = state.activeTab == WorkspaceBottomNav.TERMINAL,
+                    onClick = { viewModel.selectTab(WorkspaceBottomNav.TERMINAL) },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.Terminal,
+                            contentDescription = "Terminal"
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = "Terminal",
+                            fontFamily = InterFontFamily,
+                            fontWeight = if (state.activeTab == WorkspaceBottomNav.TERMINAL) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    modifier = Modifier.testTag("tab_terminal")
+                )
+
+                // Option 4: Preview
                 NavigationBarItem(
                     selected = state.activeTab == WorkspaceBottomNav.PREVIEW,
                     onClick = { viewModel.selectTab(WorkspaceBottomNav.PREVIEW) },
@@ -366,6 +388,10 @@ fun ProjectWorkspaceScreen(
                             },
                             onStopResponse = {
                                 viewModel.stopAiResponse()
+                            },
+                            onRunInTerminal = { command ->
+                                viewModel.executeTerminalCommand(command)
+                                viewModel.selectTab(WorkspaceBottomNav.TERMINAL)
                             }
                         )
                     }
@@ -388,6 +414,20 @@ fun ProjectWorkspaceScreen(
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 clipboard.setPrimaryClip(ClipData.newPlainText("Source Code", state.editedContent))
                                 Toast.makeText(context, "Code copied to clipboard!", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+
+                    WorkspaceBottomNav.TERMINAL -> {
+                        TerminalTab(
+                            projectName = state.projectName,
+                            terminalLogs = state.terminalLogs,
+                            isRunning = state.isTerminalRunning,
+                            onExecuteCommand = { command ->
+                                viewModel.executeTerminalCommand(command)
+                            },
+                            onClearTerminal = {
+                                viewModel.clearTerminal()
                             }
                         )
                     }
@@ -422,7 +462,8 @@ private fun AiChatTab(
     onSendMessage: (String) -> Unit,
     onRetryPrompt: (String) -> Unit,
     onSendOnboardingReply: (String) -> Unit = {},
-    onStopResponse: () -> Unit = {}
+    onStopResponse: () -> Unit = {},
+    onRunInTerminal: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var promptInput by remember { mutableStateOf("") }
@@ -1659,4 +1700,247 @@ private fun NewFolderDialog(
             }
         }
     )
+}
+
+/**
+ * Tab 3: Interactive Linux / Termux Terminal Environment with curl/wget/node/npm support.
+ */
+@Composable
+private fun TerminalTab(
+    projectName: String,
+    terminalLogs: List<String>,
+    isRunning: Boolean,
+    onExecuteCommand: (String) -> Unit,
+    onClearTerminal: () -> Unit
+) {
+    var commandInput by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    // Auto-scroll to the latest log line
+    LaunchedEffect(terminalLogs.size) {
+        if (terminalLogs.isNotEmpty()) {
+            listState.animateScrollToItem(terminalLogs.size - 1)
+        }
+    }
+
+    val quickCommands = listOf(
+        "ls -la",
+        "npm install",
+        "npm run dev",
+        "curl -O",
+        "node -v",
+        "git status"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF090D16))
+            .padding(12.dp)
+    ) {
+        // 1. Top Header Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Terminal,
+                    contentDescription = null,
+                    tint = Color(0xFF22C55E),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Terminal",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1E293B)
+                ) {
+                    Text(
+                        text = "my_projects/$projectName",
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color(0xFF38BDF8)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Running...",
+                        fontFamily = InterFontFamily,
+                        fontSize = 11.sp,
+                        color = Color(0xFF38BDF8)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                IconButton(
+                    onClick = onClearTerminal,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteSweep,
+                        contentDescription = "Clear Terminal",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // 2. Quick Command Chips Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            quickCommands.forEach { cmd ->
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    modifier = Modifier.clickable {
+                        if (cmd == "curl -O") {
+                            commandInput = "curl -O "
+                        } else {
+                            onExecuteCommand(cmd)
+                        }
+                    }
+                ) {
+                    Text(
+                        text = cmd,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = Color(0xFF38BDF8),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
+        // 3. Main Console Output Box
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            color = Color(0xFF030712),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF1F2937))
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(10.dp)
+            ) {
+                items(terminalLogs) { line ->
+                    val textColor = when {
+                        line.startsWith("$ ") -> Color(0xFF4ADE80) // Green command
+                        line.startsWith(">> ") -> Color(0xFF38BDF8) // Cyan progress
+                        line.startsWith("✓ ") -> Color(0xFFFACC15) // Yellow success
+                        line.contains("error", ignoreCase = true) || line.contains("failed", ignoreCase = true) || line.contains("fatal", ignoreCase = true) -> Color(0xFFF87171) // Red error
+                        line.startsWith("[Exit") -> Color(0xFFA78BFA) // Purple exit code
+                        else -> Color(0xFFCBD5E1) // Light gray normal text
+                    }
+
+                    Text(
+                        text = line,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = textColor
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 4. Command Input Bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = commandInput,
+                onValueChange = { commandInput = it },
+                textStyle = TextStyle(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    color = Color.White
+                ),
+                leadingIcon = {
+                    Text(
+                        text = "$",
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color(0xFF4ADE80)
+                    )
+                },
+                placeholder = {
+                    Text(
+                        text = "curl -O https://... or npm install",
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                },
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            if (commandInput.isNotBlank()) {
+                                val toRun = commandInput.trim()
+                                commandInput = ""
+                                onExecuteCommand(toRun)
+                            }
+                        },
+                        enabled = commandInput.isNotBlank(),
+                        modifier = Modifier.testTag("terminal_send_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Run Command",
+                            tint = if (commandInput.isNotBlank()) Color(0xFF4ADE80) else Color(0xFF475569),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF111827),
+                    unfocusedContainerColor = Color(0xFF111827),
+                    focusedBorderColor = Color(0xFF4ADE80),
+                    unfocusedBorderColor = Color(0xFF374151),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("terminal_command_input")
+            )
+        }
+    }
 }

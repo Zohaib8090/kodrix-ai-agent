@@ -306,6 +306,13 @@ class NodeService(private val context: Context) {
         }
     }
 
+    /**
+     * Real terminal session running interactive shell with built-in curl, wget, npm, node, and sh streaming.
+     */
+    fun createTerminalSession(workingDir: File): RealTerminalSession {
+        return RealTerminalSession(context, workingDir)
+    }
+
     private fun getMimeType(fileName: String): String {
         return when (fileName.substringAfterLast('.', "").lowercase()) {
             "html", "htm" -> "text/html; charset=utf-8"
@@ -322,14 +329,25 @@ class NodeService(private val context: Context) {
 }
 
 /**
- * Real terminal session running interactive shell with stdout/stderr streaming.
+ * Real terminal session running interactive shell with stdout/stderr streaming,
+ * built-in curl/wget network downloads, unzip, and Node.js environment.
  */
 class RealTerminalSession(
     private val context: Context,
-    private val initialDir: File = File(context.filesDir, "kodrix-projects").apply { mkdirs() }
+    var currentDir: File = File(context.filesDir, "my_projects").apply { mkdirs() }
 ) {
-    private val _outputLines = MutableStateFlow<List<String>>(listOf("Kodrix Terminal v1.0 [Termux Shell]", "$ ls"))
+    private val _outputLines = MutableStateFlow<List<String>>(
+        listOf(
+            "Kodrix Linux/Termux Environment v2.0",
+            "Built-in Tools: curl, wget, unzip, node, npm, git, sh",
+            "Working Dir: ${currentDir.name}",
+            "------------------------------------------------"
+        )
+    )
     val outputLines: StateFlow<List<String>> = _outputLines.asStateFlow()
+
+    private val _isRunning = MutableStateFlow(false)
+    val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
     private var process: Process? = null
     private var writer: PrintWriter? = null
@@ -340,17 +358,18 @@ class RealTerminalSession(
 
     fun startShell() {
         try {
-            val nodeDir = File(context.filesDir, "nodejs")
+            val nodeDir = File(context.filesDir, "nodejs").apply { mkdirs() }
             val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
             val newPath = "${nodeDir.absolutePath}:$currentPath:/data/data/com.termux/files/usr/bin"
 
             val pb = ProcessBuilder("sh")
-                .directory(initialDir)
+                .directory(currentDir)
                 .redirectErrorStream(true)
 
             val env = pb.environment()
-            env["HOME"] = initialDir.absolutePath
+            env["HOME"] = currentDir.absolutePath
             env["PATH"] = newPath
+            env["NODE_PATH"] = nodeDir.absolutePath
             env["TERM"] = "xterm-256color"
 
             process = pb.start()
@@ -366,33 +385,259 @@ class RealTerminalSession(
                     }
                 } catch (ignored: Exception) {}
             }.start()
-
-            executeCommand("echo 'Ready. Running in ' && pwd")
         } catch (e: Exception) {
-            appendOutput("Terminal error: ${e.message}")
+            appendOutput("Shell startup note: ${e.message}")
         }
     }
 
-    fun executeCommand(command: String) {
+    fun executeCommand(command: String, onComplete: ((Int) -> Unit)? = null) {
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return
         appendOutput("$ $trimmed")
-        try {
-            writer?.println(trimmed)
-            writer?.flush()
-        } catch (e: Exception) {
-            appendOutput("Execution error: ${e.message}")
+        _isRunning.value = true
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // Check if command is a built-in tool (curl, wget, unzip, cd, clear)
+                val tokens = trimmed.split("\\s+".toRegex())
+                val cmd = tokens[0].lowercase()
+
+                when (cmd) {
+                    "clear", "cls" -> {
+                        clear()
+                        _isRunning.value = false
+                        onComplete?.invoke(0)
+                        return@launch
+                    }
+
+                    "cd" -> {
+                        val target = if (tokens.size > 1) tokens[1] else currentDir.parent ?: currentDir.absolutePath
+                        val newDir = if (target.startsWith("/")) File(target) else File(currentDir, target)
+                        if (newDir.exists() && newDir.isDirectory) {
+                            currentDir = newDir.canonicalFile
+                            appendOutput("Changed directory to: ${currentDir.absolutePath}")
+                        } else {
+                            appendOutput("cd: no such directory: $target")
+                        }
+                        _isRunning.value = false
+                        onComplete?.invoke(0)
+                        return@launch
+                    }
+
+                    "curl" -> {
+                        handleCurl(tokens)
+                        _isRunning.value = false
+                        onComplete?.invoke(0)
+                        return@launch
+                    }
+
+                    "wget" -> {
+                        handleWget(tokens)
+                        _isRunning.value = false
+                        onComplete?.invoke(0)
+                        return@launch
+                    }
+
+                    "unzip" -> {
+                        handleUnzip(tokens)
+                        _isRunning.value = false
+                        onComplete?.invoke(0)
+                        return@launch
+                    }
+
+                    else -> {
+                        // Pass to shell process or fallback
+                        val nodeDir = File(context.filesDir, "nodejs")
+                        val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
+                        val newPath = "${nodeDir.absolutePath}:$currentPath:/data/data/com.termux/files/usr/bin"
+
+                        val pb = ProcessBuilder("sh", "-c", trimmed)
+                            .directory(currentDir)
+                            .redirectErrorStream(true)
+
+                        val env = pb.environment()
+                        env["HOME"] = currentDir.absolutePath
+                        env["PATH"] = newPath
+                        env["TERM"] = "xterm-256color"
+
+                        val p = pb.start()
+                        BufferedReader(InputStreamReader(p.inputStream)).use { reader ->
+                            var line: String?
+                            while (reader.readLine().also { line = it } != null) {
+                                line?.let { appendOutput(it) }
+                            }
+                        }
+                        val exit = p.waitFor()
+                        if (exit != 0) {
+                            appendOutput("[Exit code $exit]")
+                        }
+                        _isRunning.value = false
+                        onComplete?.invoke(exit)
+                    }
+                }
+            } catch (e: Exception) {
+                appendOutput("Error: ${e.message}")
+                _isRunning.value = false
+                onComplete?.invoke(-1)
+            }
         }
     }
 
-    private fun appendOutput(text: String) {
-        _outputLines.value = (_outputLines.value + text).takeLast(500)
+    private fun handleCurl(tokens: List<String>) {
+        try {
+            var urlStr: String? = null
+            var outputFile: String? = null
+            var silent = false
+            var i = 1
+            while (i < tokens.size) {
+                when (tokens[i]) {
+                    "-o" -> {
+                        if (i + 1 < tokens.size) {
+                            outputFile = tokens[i + 1]
+                            i++
+                        }
+                    }
+                    "-O" -> {
+                        // Will extract filename from URL
+                        outputFile = "AUTO"
+                    }
+                    "-s", "-sS", "--silent" -> silent = true
+                    else -> {
+                        if (!tokens[i].startsWith("-")) {
+                            urlStr = tokens[i]
+                        }
+                    }
+                }
+                i++
+            }
+
+            if (urlStr.isNullOrBlank()) {
+                appendOutput("curl: usage: curl [-o <file>] [-O] [-s] <url>")
+                return
+            }
+
+            if (!urlStr.startsWith("http://") && !urlStr.startsWith("https://")) {
+                urlStr = "https://$urlStr"
+            }
+
+            if (outputFile == "AUTO") {
+                outputFile = urlStr.substringAfterLast('/').substringBefore('?').ifEmpty { "download_${System.currentTimeMillis()}" }
+            }
+
+            if (!silent) {
+                appendOutput(">> Connecting to $urlStr ...")
+            }
+
+            val url = java.net.URL(urlStr)
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.setRequestProperty("User-Agent", "Kodrix-Agent/2.0 (Android; Linux)")
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            conn.connect()
+
+            val responseCode = conn.responseCode
+            if (responseCode !in 200..299) {
+                appendOutput("curl: HTTP error $responseCode ${conn.responseMessage}")
+                return
+            }
+
+            val totalBytes = conn.contentLengthLong
+            val inputStream = conn.inputStream
+
+            if (outputFile != null) {
+                val targetFile = if (outputFile.startsWith("/")) File(outputFile) else File(currentDir, outputFile)
+                targetFile.parentFile?.mkdirs()
+                var downloaded = 0L
+                targetFile.outputStream().use { fos ->
+                    val buffer = ByteArray(8192)
+                    var read: Int
+                    while (inputStream.read(buffer).also { read = it } != -1) {
+                        fos.write(buffer, 0, read)
+                        downloaded += read
+                    }
+                }
+                val sizeKb = downloaded / 1024
+                appendOutput("✓ Downloaded: ${targetFile.name} ($sizeKb KB) -> ${targetFile.relativeToOrSelf(currentDir).path}")
+            } else {
+                // Print text response
+                val text = inputStream.bufferedReader().use { it.readText() }
+                appendOutput(text.take(2000) + if (text.length > 2000) "\n... [truncated ${text.length - 2000} chars]" else "")
+            }
+        } catch (e: Exception) {
+            appendOutput("curl: error: ${e.message}")
+        }
+    }
+
+    private fun handleWget(tokens: List<String>) {
+        val url = tokens.firstOrNull { it.startsWith("http://") || it.startsWith("https://") }
+            ?: tokens.getOrNull(1)
+
+        if (url == null) {
+            appendOutput("wget: missing URL")
+            return
+        }
+        handleCurl(listOf("curl", "-O", url))
+    }
+
+    private fun handleUnzip(tokens: List<String>) {
+        try {
+            val zipFileName = tokens.getOrNull(1)
+            if (zipFileName.isNullOrBlank()) {
+                appendOutput("unzip: usage: unzip <file.zip> [-d <destination>]")
+                return
+            }
+            val zipFile = if (zipFileName.startsWith("/")) File(zipFileName) else File(currentDir, zipFileName)
+            if (!zipFile.exists()) {
+                appendOutput("unzip: cannot find zip file: ${zipFile.name}")
+                return
+            }
+
+            var destDir = currentDir
+            val dIndex = tokens.indexOf("-d")
+            if (dIndex != -1 && dIndex + 1 < tokens.size) {
+                val dPath = tokens[dIndex + 1]
+                destDir = if (dPath.startsWith("/")) File(dPath) else File(currentDir, dPath)
+            }
+            destDir.mkdirs()
+
+            appendOutput(">> Extracting ${zipFile.name} into ${destDir.name} ...")
+            var count = 0
+            java.util.zip.ZipInputStream(zipFile.inputStream()).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    val outFile = File(destDir, entry.name)
+                    if (entry.isDirectory) {
+                        outFile.mkdirs()
+                    } else {
+                        outFile.parentFile?.mkdirs()
+                        outFile.outputStream().use { fos ->
+                            zis.copyTo(fos)
+                        }
+                        count++
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+            appendOutput("✓ Extracted $count files successfully.")
+        } catch (e: Exception) {
+            appendOutput("unzip: error: ${e.message}")
+        }
+    }
+
+    fun clear() {
+        _outputLines.value = listOf("Terminal cleared.", "Working Dir: ${currentDir.name}")
+    }
+
+    fun appendOutput(text: String) {
+        _outputLines.value = (_outputLines.value + text).takeLast(600)
     }
 
     fun destroy() {
         try {
             process?.destroy()
             process = null
+            _isRunning.value = false
         } catch (ignored: Exception) {}
     }
 }

@@ -34,6 +34,7 @@ import java.util.UUID
 enum class WorkspaceBottomNav(val title: String) {
     AI_CHAT("AI Chat"),
     CODE("Code"),
+    TERMINAL("Terminal"),
     PREVIEW("Preview")
 }
 
@@ -66,6 +67,8 @@ data class ProjectWorkspaceUiState(
     val availableProviders: List<ProviderConfig> = emptyList(),
     val hasUnsavedChanges: Boolean = false,
     val mainFolderPath: String = "my_projects",
+    val terminalLogs: List<String> = emptyList(),
+    val isTerminalRunning: Boolean = false,
     // Onboarding conversation state
     val isOnboarding: Boolean = false,
     val isOnboardingThinking: Boolean = false,
@@ -81,6 +84,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
     private val projectRepo = ProjectRepository(application)
     private val nodeService = NodeService(application)
     private var activeAiJob: Job? = null
+    private var terminalSession: com.example.data.services.RealTerminalSession? = null
 
     private val _state = MutableStateFlow(ProjectWorkspaceUiState())
     val state: StateFlow<ProjectWorkspaceUiState> = _state.asStateFlow()
@@ -102,6 +106,33 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             statusText = "Response stopped",
             notification = "Stopped AI response"
         )
+    }
+
+    fun executeTerminalCommand(command: String) {
+        val trimmed = command.trim()
+        if (trimmed.isBlank()) return
+        terminalSession?.executeCommand(trimmed) { exitCode ->
+            // If command may have modified project files (e.g. npm, curl, git, rm, mkdir), refresh file tree
+            val lower = trimmed.lowercase()
+            if (lower.startsWith("curl") || lower.startsWith("wget") || lower.startsWith("npm") || lower.startsWith("unzip") || lower.startsWith("git") || lower.startsWith("touch") || lower.startsWith("mkdir") || lower.startsWith("rm")) {
+                viewModelScope.launch {
+                    val currentRecord = _state.value.record
+                    if (currentRecord != null) {
+                        val projectDir = projectRepo.getProjectDir(currentRecord.appName)
+                        val updatedFiles = projectRepo.readProjectFiles(projectDir)
+                        val tree = projectRepo.getProjectDirectoryTree(projectDir)
+                        _state.value = _state.value.copy(
+                            files = updatedFiles,
+                            directoryTree = tree
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearTerminal() {
+        terminalSession?.clear()
     }
 
     fun loadProject(projectId: String) {
@@ -138,6 +169,22 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             )
 
             val projectDir = projectRepo.getProjectDir(record.appName)
+            terminalSession?.destroy()
+            val session = nodeService.createTerminalSession(projectDir)
+            terminalSession = session
+
+            // Stream terminal logs into state
+            viewModelScope.launch {
+                session.outputLines.collect { lines ->
+                    _state.value = _state.value.copy(terminalLogs = lines)
+                }
+            }
+            viewModelScope.launch {
+                session.isRunning.collect { running ->
+                    _state.value = _state.value.copy(isTerminalRunning = running)
+                }
+            }
+
             val existingFiles = projectRepo.readProjectFiles(projectDir)
             val needsGeneration = existingFiles.isEmpty() || record.status.equals("InProgress", ignoreCase = true)
 
