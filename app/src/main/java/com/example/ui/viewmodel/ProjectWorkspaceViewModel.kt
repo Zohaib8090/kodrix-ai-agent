@@ -64,7 +64,11 @@ data class ProjectWorkspaceUiState(
     val activeProviderName: String = "Gemini",
     val availableProviders: List<ProviderConfig> = emptyList(),
     val hasUnsavedChanges: Boolean = false,
-    val mainFolderPath: String = "my_projects"
+    val mainFolderPath: String = "my_projects",
+    // Onboarding conversation state
+    val isOnboarding: Boolean = false,
+    val isOnboardingThinking: Boolean = false,
+    val onboardingConversation: List<WorkspaceChatMessage> = emptyList() // full Q&A history for context
 )
 
 class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(application) {
@@ -116,8 +120,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             val needsGeneration = existingFiles.isEmpty() || record.status.equals("InProgress", ignoreCase = true)
 
             if (needsGeneration) {
-                // Perform real AI code generation on device using the configured AI key
-                generateProjectCode(record, projectDir)
+                // Start onboarding conversation — AI gathers requirements before building
+                startOnboarding(record)
             } else {
                 val tree = projectRepo.getProjectDirectoryTree(projectDir)
                 val defaultFile = existingFiles.firstOrNull { it.path.endsWith("index.html") }
@@ -160,6 +164,184 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         } else {
             refineWithAi(trimmed)
         }
+    }
+
+    /**
+     * Starts the AI onboarding conversation.
+     * Instead of immediately building, Kodrix asks smart clarifying questions.
+     */
+    private suspend fun startOnboarding(record: BuildRecord) {
+        val userOpeningMsg = WorkspaceChatMessage(sender = "USER", message = record.prompt)
+        _state.value = _state.value.copy(
+            isOnboarding = true,
+            isOnboardingThinking = true,
+            chatMessages = listOf(userOpeningMsg),
+            onboardingConversation = listOf(userOpeningMsg),
+            activeTab = WorkspaceBottomNav.AI_CHAT,
+            statusText = "Kodrix is analyzing your request..."
+        )
+
+        val systemPrompt = """
+            You are Kodrix, a friendly and expert AI app builder.
+            A user wants to build an app. Their initial request is below.
+            
+            Your job is to ask ONE smart, specific clarifying question to better understand what they need.
+            Focus on the most important missing detail — this could be about:
+            - The app name (if not mentioned)
+            - The target platform (web, Android, or both — if unclear)
+            - Key features or screens they want
+            - The visual style or target audience
+            - Any other critical design decision
+            
+            Rules:
+            - Ask only ONE question. Never multiple at once.
+            - Keep it short (1-3 sentences max).
+            - Be friendly, warm, and conversational.
+            - Do NOT generate any code.
+            - Do NOT say you will now build the app.
+            - If the request is already very clear and specific, you may confirm briefly and say:
+              "READY_TO_BUILD" as your last line to signal you have enough context.
+        """.trimIndent()
+
+        val firstQuestion = aiRepo.chat(
+            providerId = _state.value.activeProviderId,
+            systemPrompt = systemPrompt,
+            userPrompt = "User request: ${record.prompt}"
+        )
+
+        if (firstQuestion.isSuccess) {
+            val aiText = firstQuestion.getOrThrow().trim()
+            if (aiText.contains("READY_TO_BUILD", ignoreCase = true)) {
+                // AI already has enough context — build immediately
+                val cleanText = aiText.replace("READY_TO_BUILD", "").trim()
+                val aiMsg = if (cleanText.isNotBlank()) WorkspaceChatMessage(sender = "AI", message = cleanText) else null
+                val allMsgs = if (aiMsg != null) listOf(userOpeningMsg, aiMsg) else listOf(userOpeningMsg)
+                _state.value = _state.value.copy(
+                    chatMessages = allMsgs,
+                    onboardingConversation = allMsgs,
+                    isOnboardingThinking = false
+                )
+                val enriched = buildEnrichedPrompt(_state.value.onboardingConversation, record.prompt)
+                val projectDir = projectRepo.getProjectDir(record.appName)
+                generateProjectCode(record.copy(prompt = enriched), projectDir)
+            } else {
+                val aiMsg = WorkspaceChatMessage(sender = "AI", message = aiText)
+                val conversation = listOf(userOpeningMsg, aiMsg)
+                _state.value = _state.value.copy(
+                    chatMessages = conversation,
+                    onboardingConversation = conversation,
+                    isOnboarding = true,
+                    isOnboardingThinking = false,
+                    statusText = "Answer Kodrix's questions to get started"
+                )
+            }
+        } else {
+            // AI failed — fall back to immediate generation
+            _state.value = _state.value.copy(
+                isOnboarding = false,
+                isOnboardingThinking = false
+            )
+            val projectDir = projectRepo.getProjectDir(record.appName)
+            generateProjectCode(record, projectDir)
+        }
+    }
+
+    /**
+     * Called when the user replies during the onboarding conversation.
+     * The AI decides when it has enough info and signals READY_TO_BUILD.
+     */
+    fun sendOnboardingReply(userMessage: String) {
+        val trimmed = userMessage.trim()
+        if (trimmed.isBlank()) return
+        val record = _state.value.record ?: return
+
+        val userMsg = WorkspaceChatMessage(sender = "USER", message = trimmed)
+        val updatedConversation = _state.value.onboardingConversation + userMsg
+
+        _state.value = _state.value.copy(
+            chatMessages = _state.value.chatMessages + userMsg,
+            onboardingConversation = updatedConversation,
+            isOnboardingThinking = true
+        )
+
+        viewModelScope.launch {
+            // Build conversation history for AI context
+            val historyText = updatedConversation.joinToString("\n") {
+                "${if (it.sender == "USER") "User" else "Kodrix"}: ${it.message}"
+            }
+
+            val systemPrompt = """
+                You are Kodrix, a friendly and expert AI app builder.
+                You are gathering requirements to build an app for a user.
+                Below is your conversation so far.
+                
+                Conversation:
+                $historyText
+                
+                Based on what you know now:
+                - If you still need ONE more critical piece of information, ask ONLY that one question (1-3 sentences, friendly).
+                - If you have enough context to build a great app, respond with a brief enthusiastic confirmation (1-2 sentences) 
+                  then end your reply with exactly: READY_TO_BUILD
+                  
+                Do NOT generate code. Do NOT ask multiple questions.
+            """.trimIndent()
+
+            val aiReply = aiRepo.chat(
+                providerId = _state.value.activeProviderId,
+                systemPrompt = systemPrompt,
+                userPrompt = trimmed
+            )
+
+            if (aiReply.isSuccess) {
+                val rawText = aiReply.getOrThrow().trim()
+                val readyToBuild = rawText.contains("READY_TO_BUILD", ignoreCase = true)
+                val cleanText = rawText.replace("READY_TO_BUILD", "").trim()
+
+                val aiMsg = WorkspaceChatMessage(sender = "AI", message = cleanText)
+                val fullConversation = updatedConversation + aiMsg
+
+                _state.value = _state.value.copy(
+                    chatMessages = _state.value.chatMessages + aiMsg,
+                    onboardingConversation = fullConversation,
+                    isOnboardingThinking = false
+                )
+
+                if (readyToBuild) {
+                    // Enough info gathered — build the project
+                    _state.value = _state.value.copy(isOnboarding = false)
+                    val enriched = buildEnrichedPrompt(fullConversation, record.prompt)
+                    val projectDir = projectRepo.getProjectDir(record.appName)
+                    generateProjectCode(record.copy(prompt = enriched), projectDir)
+                }
+            } else {
+                // AI error — keep onboarding going, show error
+                val errorMsg = WorkspaceChatMessage(
+                    sender = "AI",
+                    message = "Sorry, I had trouble reaching the AI. Please check your API key in Settings, then try replying again."
+                )
+                _state.value = _state.value.copy(
+                    chatMessages = _state.value.chatMessages + errorMsg,
+                    isOnboardingThinking = false
+                )
+            }
+        }
+    }
+
+    /**
+     * Builds an enriched prompt from the full onboarding conversation for use in code generation.
+     */
+    private fun buildEnrichedPrompt(conversation: List<WorkspaceChatMessage>, originalPrompt: String): String {
+        val qaContext = conversation.joinToString("\n") {
+            "${if (it.sender == "USER") "User" else "Kodrix"}: ${it.message}"
+        }
+        return """
+            Original request: $originalPrompt
+            
+            Full requirements conversation:
+            $qaContext
+            
+            Based on the above conversation, build exactly what the user described.
+        """.trimIndent()
     }
 
     fun selectProvider(providerId: String) {

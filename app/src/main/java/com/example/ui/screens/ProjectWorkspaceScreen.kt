@@ -363,12 +363,17 @@ fun ProjectWorkspaceScreen(
                         AiChatTab(
                             messages = state.chatMessages,
                             isAiRefining = state.isAiRefining,
+                            isOnboarding = state.isOnboarding,
+                            isOnboardingThinking = state.isOnboardingThinking,
                             activeProvider = state.activeProviderName,
                             onSendMessage = { instruction ->
                                 viewModel.refineWithAi(instruction)
                             },
                             onRetryPrompt = { prompt ->
                                 viewModel.retryPrompt(prompt)
+                            },
+                            onSendOnboardingReply = { reply ->
+                                viewModel.sendOnboardingReply(reply)
                             }
                         )
                     }
@@ -418,9 +423,12 @@ fun ProjectWorkspaceScreen(
 private fun AiChatTab(
     messages: List<WorkspaceChatMessage>,
     isAiRefining: Boolean,
+    isOnboarding: Boolean = false,
+    isOnboardingThinking: Boolean = false,
     activeProvider: String,
     onSendMessage: (String) -> Unit,
-    onRetryPrompt: (String) -> Unit
+    onRetryPrompt: (String) -> Unit,
+    onSendOnboardingReply: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var promptInput by remember { mutableStateOf("") }
@@ -520,7 +528,8 @@ private fun AiChatTab(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Inline Interactive Action Buttons for Instant Access
+                            // Inline Interactive Action Buttons (hidden during onboarding)
+                            if (!isOnboarding) {
                             if (isUser) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
