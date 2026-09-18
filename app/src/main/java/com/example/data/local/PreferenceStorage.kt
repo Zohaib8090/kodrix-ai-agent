@@ -320,7 +320,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = "",
                 baseUrl = "https://api.anthropic.com/v1",
                 authStyle = AuthStyle.X_API_KEY,
-                defaultModel = "claude-3-5-sonnet-20241022",
+                defaultModel = "claude-3-7-sonnet",
                 supportsVision = true,
                 isEnabled = true,
                 availableModels = getDefaultModelsForProvider("anthropic")

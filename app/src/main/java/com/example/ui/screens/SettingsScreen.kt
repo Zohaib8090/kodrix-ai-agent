@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1974,19 +1975,84 @@ private fun ProviderManagementCard(
                         modifier = Modifier.fillMaxWidth().testTag("apikey_${provider.id}")
                     )
 
-                    // Models selector
-                    if (provider.availableModels.isNotEmpty()) {
-                        Text(
-                            text = "Model: ${provider.defaultModel}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        KodrixChipGroup(
-                            options = provider.availableModels,
-                            selectedOption = provider.defaultModel,
-                            onSelect = onUpdateModel
-                        )
+                    // Models selector & Custom Model ID
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Model: ${provider.defaultModel}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (provider.availableModels.isNotEmpty()) {
+                            KodrixChipGroup(
+                                options = provider.availableModels,
+                                selectedOption = provider.defaultModel,
+                                onSelect = onUpdateModel
+                            )
+                        }
+
+                        var customModelInput by remember(provider.id) { mutableStateOf("") }
+                        var showCustomModelInput by remember { mutableStateOf(false) }
+
+                        if (showCustomModelInput) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = customModelInput,
+                                    onValueChange = { customModelInput = it },
+                                    label = { Text("Custom Model ID", fontSize = 11.sp) },
+                                    placeholder = { Text("e.g. gpt-4.5-preview, claude-3-7-sonnet", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    textStyle = TextStyle(fontFamily = InterFontFamily, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                        cursorColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Button(
+                                    onClick = {
+                                        if (customModelInput.isNotBlank()) {
+                                            onUpdateModel(customModelInput.trim())
+                                            showCustomModelInput = false
+                                            customModelInput = ""
+                                        }
+                                    },
+                                    enabled = customModelInput.isNotBlank(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text("Apply", fontSize = 11.sp)
+                                }
+                            }
+                        } else {
+                            TextButton(
+                                onClick = { showCustomModelInput = true },
+                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("+ Add Custom Model ID", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                     }
 
                     // Verify button

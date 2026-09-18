@@ -269,8 +269,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun updateProviderModel(providerId: String, model: String) {
-        val updated = _state.value.providers.map {
-            if (it.id == providerId) it.copy(defaultModel = model) else it
+        val trimmed = model.trim()
+        val updated = _state.value.providers.map { p ->
+            if (p.id == providerId) {
+                val updatedModels = if (p.availableModels.contains(trimmed)) {
+                    p.availableModels
+                } else {
+                    listOf(trimmed) + p.availableModels
+                }
+                p.copy(defaultModel = trimmed, availableModels = updatedModels)
+            } else {
+                p
+            }
         }
         prefs.saveProviders(updated)
         _state.value = _state.value.copy(providers = updated)
