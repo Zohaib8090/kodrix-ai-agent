@@ -270,7 +270,9 @@ fun DashboardScreen(
                         onOpenOptions = { showOptionsSheet = true },
                         onSubmit = {
                             if (promptText.isNotBlank() && !state.isLaunchingBuild) {
-                                viewModel.startBuild(onNavigateToTracker)
+                                viewModel.sendChatMessage(promptText)
+                                promptText = ""
+                                showChatSheet = true
                             }
                         },
                         isLaunching = state.isLaunchingBuild,
@@ -370,6 +372,7 @@ fun DashboardScreen(
                 viewModel.onPromptChanged(prompt)
                 category?.let { selectedCategoryId = it }
                 showChatSheet = false
+                viewModel.startBuild(onNavigateToTracker)
             },
             onDismiss = { showChatSheet = false }
         )

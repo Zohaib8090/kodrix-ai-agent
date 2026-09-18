@@ -206,12 +206,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val githubUsername: String
         get() = prefs.githubUsername
 
-    private val _chatMessages = MutableStateFlow<List<AiChatMessage>>(listOf(
-        AiChatMessage(
-            sender = ChatSender.AI,
-            text = "Hi! I'm your AI App Architect. Describe what you'd like to build (e.g. an e-commerce store, a habit tracker, or an AI assistant), and I'll help plan the architecture, UI layout, and create the optimal prompt for you!"
-        )
-    ))
+    private val _chatMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<AiChatMessage>> = _chatMessages.asStateFlow()
 
     private val _isChatGenerating = MutableStateFlow(false)

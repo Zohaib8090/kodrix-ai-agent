@@ -93,10 +93,6 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 WorkspaceChatMessage(
                     sender = "USER",
                     message = record.prompt
-                ),
-                WorkspaceChatMessage(
-                    sender = "AI",
-                    message = "Welcome! I'm your AI coding assistant powered by $providerName. I am building '${record.appName}' based on your prompt."
                 )
             )
 
