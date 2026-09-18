@@ -1,4 +1,17 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Base64
+
+// Auto-restore debug.keystore from debug.keystore.base64 if missing (e.g. on fresh clone or CI runner)
+val rootKeystore = file("${rootDir}/debug.keystore")
+val rootKeystoreBase64 = file("${rootDir}/debug.keystore.base64")
+if (!rootKeystore.exists() && rootKeystoreBase64.exists()) {
+  try {
+    val decoded = Base64.getDecoder().decode(rootKeystoreBase64.readText().trim())
+    rootKeystore.writeBytes(decoded)
+  } catch (e: Exception) {
+    logger.warn("Could not decode debug.keystore.base64: ${e.message}")
+  }
+}
 
 plugins {
   alias(libs.plugins.android.application)
