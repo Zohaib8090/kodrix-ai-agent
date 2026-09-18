@@ -53,87 +53,11 @@ class NodeService(private val context: Context) {
     private var currentRunningProcess: Process? = null
 
     /**
-     * Downloads and installs the real precompiled Node.js binary for the device's CPU architecture (ARM64 / ARMv7 / x86_64).
+     * Downloads and installs the real precompiled Node.js / Termux runtime for the device's CPU architecture.
      */
     suspend fun downloadAndInstallRealNode(onLog: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
-        try {
-            usrBin.mkdirs()
-            usrLib.mkdirs()
-
-            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-            onLog(">> Detected CPU Architecture: $abi")
-            onLog(">> Connecting to Node.js binary repository...")
-
-            val downloadUrl = when {
-                abi.contains("arm64") || abi.contains("aarch64") ->
-                    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.16-r1%2Bapt-android-7/bootstrap-aarch64.zip"
-                abi.contains("v7") || abi.contains("arm") ->
-                    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.16-r1%2Bapt-android-7/bootstrap-arm.zip"
-                else ->
-                    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.01.16-r1%2Bapt-android-7/bootstrap-x86_64.zip"
-            }
-
-            onLog(">> Downloading native Node runtime package (~18 MB) ...")
-            val zipFile = File(context.cacheDir, "node_runtime_${System.currentTimeMillis()}.zip")
-
-            val url = java.net.URL(downloadUrl)
-            val conn = url.openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 15000
-            conn.readTimeout = 60000
-            conn.connect()
-
-            if (conn.responseCode in 200..299) {
-                var downloaded = 0L
-                val totalBytes = conn.contentLengthLong
-                conn.inputStream.use { input ->
-                    zipFile.outputStream().use { output ->
-                        val buffer = ByteArray(8192)
-                        var read: Int
-                        while (input.read(buffer).also { read = it } != -1) {
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                        }
-                    }
-                }
-
-                onLog("✓ Download complete. Extracting native binaries into /data/data/${context.packageName}/files/usr ...")
-
-                java.util.zip.ZipInputStream(zipFile.inputStream()).use { zis ->
-                    var entry = zis.nextEntry
-                    while (entry != null) {
-                        val name = entry.name
-                        if (name.contains("bin/") || name.contains("lib/") || name.contains("etc/")) {
-                            val destFile = File(usrDir, name.substringAfter("usr/").ifEmpty { name })
-                            if (entry.isDirectory) {
-                                destFile.mkdirs()
-                            } else {
-                                destFile.parentFile?.mkdirs()
-                                destFile.outputStream().use { fos -> zis.copyTo(fos) }
-                                destFile.setExecutable(true, false)
-                                destFile.setReadable(true, false)
-                            }
-                        }
-                        zis.closeEntry()
-                        entry = zis.nextEntry
-                    }
-                }
-
-                zipFile.delete()
-
-                try {
-                    Runtime.getRuntime().exec(arrayOf("chmod", "-R", "755", usrDir.absolutePath)).waitFor()
-                } catch (_: Exception) {}
-
-                onLog("✓ Real Node.js & NPM binaries installed successfully!")
-                return@withContext true
-            } else {
-                onLog("⚠️ Download failed with HTTP status: ${conn.responseCode}")
-                return@withContext false
-            }
-        } catch (e: Exception) {
-            onLog("Install note: ${e.message}")
-            return@withContext false
-        }
+        val embeddedManager = EmbeddedTermuxManager(context)
+        return@withContext embeddedManager.installBootstrap(onLog)
     }
 
     /**
