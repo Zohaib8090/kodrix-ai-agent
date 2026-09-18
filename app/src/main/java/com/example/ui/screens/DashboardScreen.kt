@@ -436,7 +436,6 @@ private fun MainInputBar(
         modifier = Modifier
             .fillMaxWidth(inputBarWidth)
             .widthIn(max = 720.dp)
-            .heightIn(min = 112.dp)
             .shadow(
                 elevation = shadowElevation,
                 shape = RoundedCornerShape(20.dp),
@@ -450,7 +449,7 @@ private fun MainInputBar(
                 color = borderColor,
                 shape = RoundedCornerShape(20.dp)
             )
-            .padding(horizontal = 18.dp, vertical = 12.dp)
+            .padding(horizontal = 18.dp, vertical = 14.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -459,26 +458,14 @@ private fun MainInputBar(
             }
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Top: text input with placeholder "Make a landing page f"
+            // Top: text input with placeholder
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .defaultMinSize(minHeight = 52.dp)
             ) {
-                if (promptText.isEmpty()) {
-                    Text(
-                        text = "Make a landing page f",
-                        fontFamily = InterFontFamily,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-
                 BasicTextField(
                     value = promptText,
                     onValueChange = onPromptChange,
@@ -489,12 +476,28 @@ private fun MainInputBar(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Normal
                     ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    minLines = 2,
+                    maxLines = 6,
                     modifier = Modifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
                         .focusRequester(focusRequester)
                         .onFocusChanged { isFocused = it.isFocused }
-                        .testTag("main_prompt_input")
+                        .testTag("main_prompt_input"),
+                    decorationBox = { innerTextField ->
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            if (promptText.isEmpty()) {
+                                Text(
+                                    text = "Make a landing page for...",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 16.sp,
+                                    lineHeight = 22.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
                 )
             }
 
