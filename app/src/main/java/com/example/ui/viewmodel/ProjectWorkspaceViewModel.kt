@@ -59,7 +59,9 @@ data class ProjectWorkspaceUiState(
     val chatMessages: List<WorkspaceChatMessage> = emptyList(),
     val isAiRefining: Boolean = false,
     val notification: String? = null,
+    val activeProviderId: String = "gemini",
     val activeProviderName: String = "Gemini",
+    val availableProviders: List<ProviderConfig> = emptyList(),
     val hasUnsavedChanges: Boolean = false,
     val mainFolderPath: String = "my_projects"
 )
@@ -86,6 +88,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 return@launch
             }
 
+            val allProviders = aiRepo.getProviders().filter { it.isEnabled }
             val providerConfig = aiRepo.getProviderConfig(record.codegenProviderId)
             val providerName = providerConfig?.name ?: record.codegenProviderId.replaceFirstChar { it.uppercase() }
 
@@ -100,7 +103,9 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 record = record,
                 projectName = record.appName,
                 platform = record.platform,
+                activeProviderId = record.codegenProviderId,
                 activeProviderName = providerName,
+                availableProviders = allProviders,
                 chatMessages = initialMessages,
                 mainFolderPath = "my_projects/${record.appName}"
             )
@@ -141,6 +146,22 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         }
     }
 
+    fun selectProvider(providerId: String) {
+        val config = aiRepo.getProviderConfig(providerId)
+        val name = config?.name ?: providerId.replaceFirstChar { it.uppercase() }
+        _state.value = _state.value.copy(
+            activeProviderId = providerId,
+            activeProviderName = name,
+            notification = "Switched AI to $name"
+        )
+        val currentRecord = _state.value.record ?: return
+        viewModelScope.launch {
+            val updated = currentRecord.copy(codegenProviderId = providerId)
+            db.buildRecordDao().update(updated)
+            _state.value = _state.value.copy(record = updated)
+        }
+    }
+
     private suspend fun generateProjectCode(record: BuildRecord, projectDir: File) {
         _state.value = _state.value.copy(
             isGenerating = true,
@@ -160,7 +181,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             statusText = "AI is writing source code and structuring files..."
         )
 
-        val codeResult = aiRepo.generateCode(record.codegenProviderId, record.prompt, appContext)
+        val codeResult = aiRepo.generateCode(_state.value.activeProviderId, record.prompt, appContext)
         val artifact = codeResult.getOrNull()
 
         val savedDir = if (artifact != null) {
@@ -356,6 +377,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         if (userInstruction.isBlank()) return
         val currentRecord = _state.value.record ?: return
         val currentFiles = _state.value.files
+        val activePid = _state.value.activeProviderId
 
         viewModelScope.launch {
             val userMsg = WorkspaceChatMessage(sender = "USER", message = userInstruction)
@@ -364,86 +386,142 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 isAiRefining = true
             )
 
-            val isWeb = currentRecord.platform.equals("WEB", ignoreCase = true)
             val existingSummary = currentFiles.take(8).joinToString("\n---\n") { "${it.path}:\n${it.content.take(1500)}" }
 
-            val refinePrompt = """
-                You are updating an existing ${currentRecord.platform} application '${currentRecord.appName}'.
-                USER REQUEST: $userInstruction
-
-                CURRENT SOURCE FILES:
+            val systemPrompt = """
+                You are an expert AI software developer and project assistant for the ${currentRecord.platform} application '${currentRecord.appName}'.
+                
+                The project currently has these source files:
                 $existingSummary
 
-                CRITICAL INSTRUCTION:
-                Provide the full updated code files for any modified or new files using the format:
-                FILE: path/to/file
-                ```[language]
-                [file content]
-                ```
-                ENDFILE
+                CRITICAL INSTRUCTIONS:
+                1. If the user is greeting (e.g. 'hi', 'hello', 'hey'), asking a general question, asking for project guidance, or having a conversation without requesting code edits:
+                   Respond conversationally, politely, and helpfully. DO NOT generate empty code files or template files.
+                
+                2. If the user is requesting modifications, bug fixes, design adjustments, or new features:
+                   First write a 1-2 sentence friendly summary of what you modified.
+                   Then output each modified or new file using the EXACT format:
+                   FILE: relative/path/to/file.ext
+                   ```[language]
+                   [full complete code for the file]
+                   ```
+                   ENDFILE
             """.trimIndent()
 
-            val appContext = AppContext(
-                appName = currentRecord.appName,
-                platform = if (isWeb) PlatformType.WEB else PlatformType.ANDROID,
-                framework = try { WebFramework.valueOf(currentRecord.framework) } catch (_: Exception) { WebFramework.REACT_VITE },
-                features = currentRecord.featuresJson.split(",").filter { it.isNotBlank() },
-                prompt = userInstruction
+            val chatResult = aiRepo.chat(
+                providerId = activePid,
+                systemPrompt = systemPrompt,
+                userPrompt = userInstruction
             )
 
-            val result = aiRepo.generateCode(currentRecord.codegenProviderId, refinePrompt, appContext)
-            val artifact = result.getOrNull()
+            if (chatResult.isSuccess) {
+                val rawAiResponse = chatResult.getOrThrow()
+                val parsedFiles = parseFilesFromAiResponse(rawAiResponse)
+                val conversationalText = extractConversationalText(rawAiResponse, parsedFiles.isNotEmpty())
 
-            if (artifact != null && artifact.files.isNotEmpty()) {
-                val projectDir = projectRepo.saveArtifactToDisk(currentRecord.appName, artifact)
-                val updatedFiles = projectRepo.readProjectFiles(projectDir)
-                val tree = projectRepo.getProjectDirectoryTree(projectDir)
-                val updatedHtml = updatedFiles.firstOrNull { it.path.endsWith("index.html") }?.content
-                val currentSelected = _state.value.selectedFile
-                val reSelected = updatedFiles.firstOrNull { it.path == currentSelected?.path }
-                    ?: updatedFiles.firstOrNull { it.path.endsWith("index.html") }
-                    ?: updatedFiles.firstOrNull()
-
-                val aiMsg = WorkspaceChatMessage(
-                    sender = "AI",
-                    message = "Done! I updated ${artifact.files.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
-                            artifact.files.joinToString("\n") { "• ${it.path}" } +
-                            "\n\nCheck the Preview tab to see the live updates, or the Code tab to see the modified code!"
-                )
-
-                // Trigger background notification
-                try {
-                    NotificationHelper.notifyAiRefineCompleted(
-                        context = context,
-                        projectName = currentRecord.appName,
-                        projectId = currentRecord.id,
-                        summary = "Updated ${artifact.files.size} file(s) for your prompt."
+                if (parsedFiles.isNotEmpty()) {
+                    val artifact = CodeArtifact(
+                        files = parsedFiles,
+                        explanation = conversationalText.ifBlank { "Updated ${parsedFiles.size} project files." },
+                        previewHtml = parsedFiles.firstOrNull { it.path.endsWith("index.html") }?.content
                     )
-                } catch (_: Exception) {}
+                    val projectDir = projectRepo.saveArtifactToDisk(currentRecord.appName, artifact)
+                    val updatedFiles = projectRepo.readProjectFiles(projectDir)
+                    val tree = projectRepo.getProjectDirectoryTree(projectDir)
+                    val updatedHtml = updatedFiles.firstOrNull { it.path.endsWith("index.html") }?.content
+                    val currentSelected = _state.value.selectedFile
+                    val reSelected = updatedFiles.firstOrNull { it.path == currentSelected?.path }
+                        ?: updatedFiles.firstOrNull { it.path.endsWith("index.html") }
+                        ?: updatedFiles.firstOrNull()
 
-                _state.value = _state.value.copy(
-                    isAiRefining = false,
-                    chatMessages = _state.value.chatMessages + aiMsg,
-                    files = updatedFiles,
-                    directoryTree = tree,
-                    selectedFile = reSelected,
-                    editedContent = reSelected?.content ?: "",
-                    hasUnsavedChanges = false,
-                    previewHtml = updatedHtml ?: _state.value.previewHtml,
-                    notification = "Applied updates to project files!"
-                )
+                    val explanationPrefix = if (conversationalText.isNotBlank()) "$conversationalText\n\n" else ""
+                    val aiMsg = WorkspaceChatMessage(
+                        sender = "AI",
+                        message = "${explanationPrefix}✨ Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
+                                parsedFiles.joinToString("\n") { "• ${it.path}" } +
+                                "\n\nCheck the Preview tab to see the live updates, or the Code tab to inspect the source code."
+                    )
+
+                    try {
+                        NotificationHelper.notifyAiRefineCompleted(
+                            context = context,
+                            projectName = currentRecord.appName,
+                            projectId = currentRecord.id,
+                            summary = "Updated ${parsedFiles.size} file(s) for your prompt."
+                        )
+                    } catch (_: Exception) {}
+
+                    _state.value = _state.value.copy(
+                        isAiRefining = false,
+                        chatMessages = _state.value.chatMessages + aiMsg,
+                        files = updatedFiles,
+                        directoryTree = tree,
+                        selectedFile = reSelected,
+                        editedContent = reSelected?.content ?: "",
+                        hasUnsavedChanges = false,
+                        previewHtml = updatedHtml ?: _state.value.previewHtml,
+                        notification = "Applied updates to project files!"
+                    )
+                } else {
+                    // Conversational response without file updates
+                    val cleanReply = conversationalText.ifBlank { rawAiResponse.trim() }
+                    val aiMsg = WorkspaceChatMessage(
+                        sender = "AI",
+                        message = cleanReply.ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
+                    )
+                    _state.value = _state.value.copy(
+                        isAiRefining = false,
+                        chatMessages = _state.value.chatMessages + aiMsg
+                    )
+                }
             } else {
+                val errorMsg = chatResult.exceptionOrNull()?.localizedMessage ?: "Unknown AI error"
                 val aiMsg = WorkspaceChatMessage(
                     sender = "AI",
-                    message = "Could not apply code update: ${result.exceptionOrNull()?.localizedMessage ?: "Unknown AI error"}. Please verify your API key in Settings."
+                    message = "Could not contact AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
                 )
                 _state.value = _state.value.copy(
                     isAiRefining = false,
                     chatMessages = _state.value.chatMessages + aiMsg,
-                    notification = "AI code update failed."
+                    notification = "AI request failed."
                 )
             }
         }
+    }
+
+    private fun parseFilesFromAiResponse(raw: String): List<SourceFile> {
+        val parsedFiles = mutableListOf<SourceFile>()
+        val primaryRegex = Regex("""FILE:\s*([^\r\n]+)\s*\r?\n```[a-z0-9_-]*\r?\n([\s\S]*?)```(?:\s*\r?\nENDFILE)?""", RegexOption.IGNORE_CASE)
+        for (match in primaryRegex.findAll(raw)) {
+            val path = match.groupValues[1].trim()
+            val content = match.groupValues[2]
+            if (path.isNotBlank() && content.isNotBlank()) {
+                parsedFiles.add(SourceFile(path, content))
+            }
+        }
+        if (parsedFiles.isEmpty()) {
+            val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\s*\r?\n```[a-z0-9_-]*\r?\n([\s\S]*?)```""", RegexOption.IGNORE_CASE)
+            for (match in secondaryRegex.findAll(raw)) {
+                val path = match.groupValues[1].trim()
+                val content = match.groupValues[2]
+                if (path.isNotBlank() && content.isNotBlank()) {
+                    parsedFiles.add(SourceFile(path, content))
+                }
+            }
+        }
+        return parsedFiles
+    }
+
+    private fun extractConversationalText(raw: String, hasCodeFiles: Boolean): String {
+        if (!hasCodeFiles) {
+            return raw.trim()
+        }
+        var cleaned = raw
+        val fileBlockRegex = Regex("""FILE:\s*[^\r\n]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```(?:\s*\r?\nENDFILE)?""", RegexOption.IGNORE_CASE)
+        cleaned = fileBlockRegex.replace(cleaned, "")
+        val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)[a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```""", RegexOption.IGNORE_CASE)
+        cleaned = secondaryRegex.replace(cleaned, "")
+        return cleaned.trim()
     }
 
     fun exportAsZip(context: Context) {

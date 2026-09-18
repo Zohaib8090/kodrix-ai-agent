@@ -122,6 +122,79 @@ fun ProjectWorkspaceScreen(
                     }
                 },
                 actions = {
+                    // Provider selector dropdown if multiple providers are available
+                    var providerMenuExpanded by remember { mutableStateOf(false) }
+                    if (state.availableProviders.isNotEmpty()) {
+                        Box {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .clickable { providerMenuExpanded = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "AI Provider",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = state.activeProviderName,
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = providerMenuExpanded,
+                                onDismissRequest = { providerMenuExpanded = false }
+                            ) {
+                                state.availableProviders.forEach { provider ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = provider.name,
+                                                    fontFamily = InterFontFamily,
+                                                    fontWeight = if (provider.id == state.activeProviderId) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (provider.id == state.activeProviderId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                                if (provider.id == state.activeProviderId) {
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            viewModel.selectProvider(provider.id)
+                                            providerMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     if (state.platform.equals("WEB", ignoreCase = true)) {
                         IconButton(
                             onClick = { viewModel.openInBrowser(context) },
@@ -475,16 +548,27 @@ private fun AiChatTab(
                         Text(
                             "Ask AI to code changes or add features...",
                             fontFamily = InterFontFamily,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     },
                     modifier = Modifier
                         .weight(1f)
                         .testTag("ai_refine_input"),
+                    textStyle = TextStyle(
+                        fontFamily = InterFontFamily,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
                     shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.background,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.background
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        cursorColor = MaterialTheme.colorScheme.primary
                     ),
                     maxLines = 3
                 )
@@ -803,10 +887,13 @@ private fun ProjectDirectoryCodeTab(
                     ),
                     shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                         focusedContainerColor = MaterialTheme.colorScheme.surface,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        cursorColor = MaterialTheme.colorScheme.primary
                     )
                 )
             }
@@ -1151,6 +1238,10 @@ private fun NewFileDialog(
                     onValueChange = { filePath = it },
                     placeholder = { Text("path/to/filename.ext") },
                     singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -1190,6 +1281,10 @@ private fun NewFolderDialog(
                     onValueChange = { folderPath = it },
                     placeholder = { Text("folder_name") },
                     singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
