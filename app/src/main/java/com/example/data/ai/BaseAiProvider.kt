@@ -66,8 +66,9 @@ abstract class BaseAiProvider(
     override suspend fun generateCode(prompt: String, context: AppContext): Result<CodeArtifact> = withContext(Dispatchers.IO) {
         try {
             if (config.apiKey.isBlank() && config.authStyle != AuthStyle.NONE) {
-                // Fallback to local high-fidelity generator when key is not entered
-                return@withContext Result.success(generateLocalTemplate(prompt, context))
+                return@withContext Result.failure(
+                    Exception("API key is not configured for ${config.name}. Please configure your API key in Settings.")
+                )
             }
 
             // Attempt AI provider call
@@ -78,13 +79,16 @@ abstract class BaseAiProvider(
 
             if (aiResult.isSuccess) {
                 val parsed = parseCodeFromResponse(aiResult.getOrThrow(), context, prompt)
-                Result.success(parsed)
+                if (parsed.files.isEmpty()) {
+                    Result.failure(Exception("The AI responded, but no code files could be parsed from the response."))
+                } else {
+                    Result.success(parsed)
+                }
             } else {
-                // Fallback to rich template so user workflow is never blocked
-                Result.success(generateLocalTemplate(prompt, context))
+                Result.failure(aiResult.exceptionOrNull() ?: Exception("AI model call failed for ${config.name}."))
             }
         } catch (e: Exception) {
-            Result.success(generateLocalTemplate(prompt, context))
+            Result.failure(e)
         }
     }
 
@@ -263,8 +267,10 @@ abstract class BaseAiProvider(
             )
         }
 
-        // Only fallback to template if parsing completely fails. No hardcoded template as default.
-        return generateLocalTemplate(prompt, context)
+        return CodeArtifact(
+            files = emptyList(),
+            explanation = "No valid code files could be parsed from AI response."
+        )
     }
 
     protected fun generateLocalTemplate(prompt: String, context: AppContext): CodeArtifact {

@@ -236,13 +236,19 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 )
             }
         } else {
-            // AI failed — fall back to immediate generation
-            _state.value = _state.value.copy(
-                isOnboarding = false,
-                isOnboardingThinking = false
+            val errorDetails = firstQuestion.exceptionOrNull()?.message ?: "Unable to connect to AI provider"
+            val aiMsg = WorkspaceChatMessage(
+                sender = "AI",
+                message = "⚠️ Could not connect to ${_state.value.activeProviderName}:\n\n$errorDetails\n\nPlease configure your API key for ${_state.value.activeProviderName} in Settings (top-right gear icon), then reply here to continue."
             )
-            val projectDir = projectRepo.getProjectDir(record.appName)
-            generateProjectCode(record, projectDir)
+            val conversation = listOf(userOpeningMsg, aiMsg)
+            _state.value = _state.value.copy(
+                chatMessages = conversation,
+                onboardingConversation = conversation,
+                isOnboarding = true,
+                isOnboardingThinking = false,
+                statusText = "API key required or AI connection error"
+            )
         }
     }
 
@@ -382,11 +388,31 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         val codeResult = aiRepo.generateCode(_state.value.activeProviderId, record.prompt, appContext)
         val artifact = codeResult.getOrNull()
 
-        val savedDir = if (artifact != null) {
-            projectRepo.saveArtifactToDisk(record.appName, artifact)
-        } else {
-            projectDir
+        if (artifact == null || artifact.files.isEmpty()) {
+            val errorReason = codeResult.exceptionOrNull()?.message ?: "AI provider returned empty response."
+            val failedRecord = record.copy(
+                status = "Failed",
+                currentStep = "Failed: $errorReason"
+            )
+            db.buildRecordDao().update(failedRecord)
+
+            val errorMsg = WorkspaceChatMessage(
+                sender = "AI",
+                message = "❌ Code generation failed:\n\n$errorReason\n\nPlease check your API key in Settings, verify your provider connection, and try again."
+            )
+
+            _state.value = _state.value.copy(
+                record = failedRecord,
+                isGenerating = false,
+                statusText = "Generation failed: $errorReason",
+                chatMessages = _state.value.chatMessages + errorMsg,
+                activeTab = WorkspaceBottomNav.AI_CHAT,
+                notification = "Build failed: $errorReason"
+            )
+            return
         }
+
+        val savedDir = projectRepo.saveArtifactToDisk(record.appName, artifact)
 
         if (isWeb) {
             nodeService.startLocalDevServer(savedDir, port = 5173)
