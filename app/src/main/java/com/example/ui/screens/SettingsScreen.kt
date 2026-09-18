@@ -1016,6 +1016,9 @@ fun SettingsScreen(
 
     // Modal: Add Custom Provider Dialog
     if (showAddCustomProviderDialog) {
+        var selectedTab by remember { mutableIntStateOf(0) }
+
+        // Tab 0: Manual fields
         var name by remember { mutableStateOf("") }
         var baseUrl by remember { mutableStateOf("") }
         var apiKey by remember { mutableStateOf("") }
@@ -1024,97 +1027,198 @@ fun SettingsScreen(
         var typeDropdownExpanded by remember { mutableStateOf(false) }
         val types = listOf("OpenAI Compatible", "Anthropic Compatible", "Gemini Compatible")
 
+        // Tab 1: JSON import
+        var jsonText by remember { mutableStateOf("") }
+        var jsonError by remember { mutableStateOf("") }
+
+        val jsonFilePicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+            uri?.let {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(it)
+                    jsonText = inputStream?.bufferedReader()?.readText() ?: ""
+                    jsonError = ""
+                } catch (e: Exception) {
+                    jsonError = "Could not read file: ${e.localizedMessage}"
+                }
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { showAddCustomProviderDialog = false },
             title = {
-                Text(
-                    text = "Add Custom AI Provider",
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = providerType,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Provider Type") },
-                            trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        androidx.compose.material3.Surface(
-                            modifier = Modifier.matchParentSize().clickable { typeDropdownExpanded = true },
-                            color = androidx.compose.ui.graphics.Color.Transparent
-                        ) {}
-                        DropdownMenu(
-                            expanded = typeDropdownExpanded,
-                            onDismissRequest = { typeDropdownExpanded = false }
-                        ) {
-                            types.forEach { type ->
-                                DropdownMenuItem(
-                                    text = { Text(type) },
-                                    onClick = {
-                                        providerType = type
-                                        typeDropdownExpanded = false
-                                    }
+                Column {
+                    Text(
+                        text = "Add AI Provider",
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Tab strip
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        listOf("Manual", "Import JSON").forEachIndexed { idx, label ->
+                            val isTab = selectedTab == idx
+                            Surface(
+                                onClick = { selectedTab = idx },
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isTab) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.Transparent,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isTab) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (isTab) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(vertical = 6.dp)
                                 )
                             }
                         }
                     }
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Provider Name") },
-                        placeholder = { Text("e.g. Together AI") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = baseUrl,
-                        onValueChange = { baseUrl = it },
-                        label = { Text("Base URL") },
-                        placeholder = { Text("https://api.together.xyz/v1") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it },
-                        label = { Text("API Key") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = modelName,
-                        onValueChange = { modelName = it },
-                        label = { Text("Model Name") },
-                        placeholder = { Text("e.g. meta-llama/Llama-3-70b") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                }
+            },
+            text = {
+                if (selectedTab == 0) {
+                    // Manual entry tab
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = providerType,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Provider Type") },
+                                trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            androidx.compose.material3.Surface(
+                                modifier = Modifier.matchParentSize().clickable { typeDropdownExpanded = true },
+                                color = androidx.compose.ui.graphics.Color.Transparent
+                            ) {}
+                            DropdownMenu(
+                                expanded = typeDropdownExpanded,
+                                onDismissRequest = { typeDropdownExpanded = false }
+                            ) {
+                                types.forEach { type ->
+                                    DropdownMenuItem(
+                                        text = { Text(type) },
+                                        onClick = { providerType = type; typeDropdownExpanded = false }
+                                    )
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = name, onValueChange = { name = it },
+                            label = { Text("Provider Name") }, placeholder = { Text("e.g. Together AI") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = baseUrl, onValueChange = { baseUrl = it },
+                            label = { Text("Base URL") }, placeholder = { Text("https://api.together.xyz/v1") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = apiKey, onValueChange = { apiKey = it },
+                            label = { Text("API Key") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = modelName, onValueChange = { modelName = it },
+                            label = { Text("Model Name") }, placeholder = { Text("e.g. meta-llama/Llama-3-70b") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                } else {
+                    // JSON import tab
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "Paste a JSON provider object or array, or upload a .json file.",
+                            fontFamily = InterFontFamily,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        // Example hint
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "{ \"name\": \"MyProvider\", \"baseUrl\": \"https://api.x.ai/v1\", \"apiKey\": \"sk-...\", \"defaultModel\": \"grok-beta\" }",
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                        OutlinedTextField(
+                            value = jsonText,
+                            onValueChange = { jsonText = it; jsonError = "" },
+                            label = { Text("JSON") },
+                            placeholder = { Text("Paste JSON here...") },
+                            minLines = 4,
+                            maxLines = 8,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = if (jsonError.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (jsonError.isNotBlank()) {
+                            Text(
+                                text = jsonError,
+                                fontFamily = InterFontFamily,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        // Upload file button
+                        OutlinedButton(
+                            onClick = { jsonFilePicker.launch("application/json") },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("upload_json_provider_button")
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Upload .json File", fontFamily = InterFontFamily, fontSize = 13.sp)
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (baseUrl.isNotBlank()) {
-                            viewModel.addCustomProvider(name, baseUrl, apiKey, modelName, providerType)
-                            showAddCustomProviderDialog = false
-                            Toast.makeText(context, "Custom provider added", Toast.LENGTH_SHORT).show()
+                        if (selectedTab == 0) {
+                            if (baseUrl.isNotBlank()) {
+                                viewModel.addCustomProvider(name, baseUrl, apiKey, modelName, providerType)
+                                showAddCustomProviderDialog = false
+                                Toast.makeText(context, "Custom provider added", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            if (jsonText.isBlank()) {
+                                jsonError = "JSON cannot be empty"
+                            } else {
+                                val result = viewModel.importProvidersFromJson(jsonText)
+                                if (result.isSuccess) {
+                                    showAddCustomProviderDialog = false
+                                    Toast.makeText(context, "Imported ${result.getOrDefault(0)} provider(s)", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    jsonError = "Invalid JSON: ${result.exceptionOrNull()?.localizedMessage?.take(80)}"
+                                }
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("Add Provider")
+                    Text(if (selectedTab == 0) "Add Provider" else "Import")
                 }
             },
             dismissButton = {

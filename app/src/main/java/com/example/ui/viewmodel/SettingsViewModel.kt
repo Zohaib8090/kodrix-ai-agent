@@ -314,6 +314,66 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         triggerHaptic()
     }
 
+    /**
+     * Imports one or more AI providers from a JSON string.
+     * Accepts either:
+     * - A single provider object: { "id": ..., "name": ..., "apiKey": ..., ... }
+     * - An array of provider objects: [{ ... }, { ... }]
+     */
+    fun importProvidersFromJson(json: String): Result<Int> {
+        return try {
+            val trimmed = json.trim()
+            val providerList = mutableListOf<ProviderConfig>()
+
+            fun parseObject(obj: org.json.JSONObject): ProviderConfig {
+                val id = obj.optString("id").ifBlank { "custom_openai_${System.currentTimeMillis()}" }
+                val name = obj.optString("name", "Imported Provider")
+                val baseUrl = obj.optString("baseUrl", obj.optString("base_url", ""))
+                val apiKey = obj.optString("apiKey", obj.optString("api_key", ""))
+                val model = obj.optString("defaultModel", obj.optString("model", "custom-model"))
+                val authStyleStr = obj.optString("authStyle", obj.optString("auth_style", "BEARER"))
+                val authStyle = try { AuthStyle.valueOf(authStyleStr.uppercase()) } catch (_: Exception) { AuthStyle.BEARER }
+                val supportsVision = obj.optBoolean("supportsVision", false)
+                val isEnabled = obj.optBoolean("isEnabled", true)
+                return ProviderConfig(
+                    id = id,
+                    name = name,
+                    baseUrl = baseUrl,
+                    apiKey = apiKey,
+                    authStyle = authStyle,
+                    defaultModel = model,
+                    isEnabled = isEnabled,
+                    isValid = false,
+                    supportsVision = supportsVision,
+                    statusMessage = "Imported from JSON",
+                    availableModels = listOf(model)
+                )
+            }
+
+            if (trimmed.startsWith("[")) {
+                val arr = org.json.JSONArray(trimmed)
+                for (i in 0 until arr.length()) {
+                    providerList.add(parseObject(arr.getJSONObject(i)))
+                }
+            } else {
+                providerList.add(parseObject(org.json.JSONObject(trimmed)))
+            }
+
+            val current = _state.value.providers.toMutableList()
+            // Avoid duplicates: replace if same id, otherwise append
+            providerList.forEach { imported ->
+                val idx = current.indexOfFirst { it.id == imported.id }
+                if (idx >= 0) current[idx] = imported else current.add(imported)
+            }
+            prefs.saveProviders(current)
+            _state.value = _state.value.copy(providers = current)
+            triggerHaptic()
+            Result.success(providerList.size)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun verifyProvider(providerId: String) {
         val config = _state.value.providers.find { it.id == providerId } ?: return
         viewModelScope.launch {

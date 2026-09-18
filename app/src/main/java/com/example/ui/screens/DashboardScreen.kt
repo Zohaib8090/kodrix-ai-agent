@@ -270,9 +270,7 @@ fun DashboardScreen(
                         onOpenOptions = { showOptionsSheet = true },
                         onSubmit = {
                             if (promptText.isNotBlank() && !state.isLaunchingBuild) {
-                                viewModel.sendChatMessage(promptText)
-                                promptText = ""
-                                showChatSheet = true
+                                viewModel.startBuild(onNavigateToTracker)
                             }
                         },
                         isLaunching = state.isLaunchingBuild,
