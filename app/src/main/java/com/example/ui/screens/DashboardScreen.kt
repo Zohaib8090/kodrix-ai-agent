@@ -67,6 +67,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.R
 import com.example.data.model.PlatformType
 import com.example.data.model.WebFramework
@@ -142,8 +145,20 @@ fun DashboardScreen(
     var selectedCategoryId by remember { mutableStateOf("website") }
     var promptSetIndex by remember { mutableIntStateOf(0) }
     var refreshRotation by remember { mutableFloatStateOf(0f) }
+    // showOptionsSheet is kept in state but no longer triggered by the "+" button
+    // (Build Settings sheet is hidden for now — will be relocated to another menu)
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showChatSheet by remember { mutableStateOf(false) }
+
+    // File attachment state for the "+" upload button
+    var attachedFiles by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            attachedFiles = (attachedFiles + uris).distinct()
+        }
+    }
 
     // Synchronize if external change
     LaunchedEffect(state.prompt) {
@@ -267,14 +282,17 @@ fun DashboardScreen(
                             promptText = it
                             viewModel.onPromptChanged(it)
                         },
-                        onOpenOptions = { showOptionsSheet = true },
+                        // "+" now opens file/folder upload picker (zip, any format)
+                        onOpenOptions = { filePicker.launch("*/*") },
                         onSubmit = {
                             if (promptText.isNotBlank() && !state.isLaunchingBuild) {
                                 viewModel.startBuild(onNavigateToTracker)
                             }
                         },
                         isLaunching = state.isLaunchingBuild,
-                        isMobile = isMobile
+                        isMobile = isMobile,
+                        attachedFiles = attachedFiles,
+                        onRemoveFile = { uri -> attachedFiles = attachedFiles - uri }
                     )
 
                     // 5. Category Filters Row
@@ -348,7 +366,10 @@ fun DashboardScreen(
         }
     }
 
-    // Advanced Options Bottom Sheet triggered by the "+" button
+    // NOTE: AdvancedOptionsBottomSheet is temporarily hidden from the "+" button.
+    // Build Settings & AI Configuration will be relocated to another menu in a future update.
+    // The code below is kept intact — do NOT delete it.
+    /*
     if (showOptionsSheet) {
         AdvancedOptionsBottomSheet(
             state = state,
@@ -360,6 +381,7 @@ fun DashboardScreen(
             onDismiss = { showOptionsSheet = false }
         )
     }
+    */
 
     // AI App Architect Chat Bottom Sheet
     if (showChatSheet) {
@@ -389,7 +411,9 @@ private fun MainInputBar(
     onOpenOptions: () -> Unit,
     onSubmit: () -> Unit,
     isLaunching: Boolean,
-    isMobile: Boolean
+    isMobile: Boolean,
+    attachedFiles: List<Uri> = emptyList(),
+    onRemoveFile: (Uri) -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -412,7 +436,7 @@ private fun MainInputBar(
         modifier = Modifier
             .fillMaxWidth(inputBarWidth)
             .widthIn(max = 720.dp)
-            .height(112.dp)
+            .heightIn(min = 112.dp)
             .shadow(
                 elevation = shadowElevation,
                 shape = RoundedCornerShape(20.dp),
@@ -472,6 +496,49 @@ private fun MainInputBar(
                         .onFocusChanged { isFocused = it.isFocused }
                         .testTag("main_prompt_input")
                 )
+            }
+
+            // Attached files strip — shown when files are attached via the "+" button
+            if (attachedFiles.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    attachedFiles.forEach { uri ->
+                        val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = fileName.take(20) + if (fileName.length > 20) "…" else "",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove file",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clickable { onRemoveFile(uri) }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // Bottom bar: "+" on left, peach submit button on right
