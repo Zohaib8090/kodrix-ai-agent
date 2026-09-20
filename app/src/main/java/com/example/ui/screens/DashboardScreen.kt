@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Language
@@ -380,42 +381,104 @@ fun DashboardScreen(
 
     val currentExamplePills = EXAMPLE_PROMPT_SETS[promptSetIndex % EXAMPLE_PROMPT_SETS.size]
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets.safeDrawing,
-        topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val coroutineScope = rememberCoroutineScope()
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(300.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
             ) {
-                IconButton(
-                    onClick = onNavigateToHistory,
-                    modifier = Modifier.testTag("projects_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Folder,
-                        contentDescription = "Projects",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                IconButton(
-                    onClick = onNavigateToSettings,
-                    modifier = Modifier.testTag("settings_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = MaterialTheme.colorScheme.onSurface
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "Kodrix AI",
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    fontFamily = InterFontFamily,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                
+                // Build Section
+                Text(
+                    "Build Apps",
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    fontFamily = InterFontFamily,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                
+                CATEGORIES.forEach { category ->
+                    NavigationDrawerItem(
+                        icon = { Icon(category.icon, contentDescription = null) },
+                        label = { Text(category.label, fontFamily = InterFontFamily) },
+                        selected = selectedCategoryId == category.id,
+                        onClick = {
+                            selectedCategoryId = category.id
+                            category.platform?.let { viewModel.onPlatformChanged(it) }
+                            if (promptText.isBlank()) {
+                                promptText = category.defaultPromptHint
+                                viewModel.onPromptChanged(category.defaultPromptHint)
+                            }
+                            coroutineScope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                     )
                 }
             }
-        }
-    ) { innerPadding ->
+        },
+        content = {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                contentWindowInsets = WindowInsets.safeDrawing,
+                topBar = {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { coroutineScope.launch { drawerState.open() } },
+                            modifier = Modifier.testTag("menu_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Menu",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Row {
+                            IconButton(
+                                onClick = onNavigateToHistory,
+                                modifier = Modifier.testTag("projects_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = "Projects",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(
+                                onClick = onNavigateToSettings,
+                                modifier = Modifier.testTag("settings_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Settings",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -443,12 +506,12 @@ fun DashboardScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // 2. Large Heading Text: "What will you build?"
+                    // 2. Large Heading Text
                     Text(
-                        text = "What will you build?",
+                        text = "Tell me what you'd like to do,\nI'm here to help.",
                         fontFamily = InterFontFamily,
-                        fontSize = headingFontSize,
-                        lineHeight = headingLineHeight,
+                        fontSize = if (isMobile) 28.sp else 48.sp,
+                        lineHeight = if (isMobile) 36.sp else 56.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = (-0.02).em,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -456,18 +519,6 @@ fun DashboardScreen(
                         modifier = Modifier.testTag("landing_heading")
                     )
 
-                    // 3. Subtext: "You can always make changes later."
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "You can always make changes later.",
-                        fontFamily = InterFontFamily,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.testTag("landing_subtext")
-                    )
 
                     // 4. Main Input Bar
                     Spacer(modifier = Modifier.height(32.dp))
@@ -494,76 +545,13 @@ fun DashboardScreen(
                         onOpenModelPicker = { showModelPickerSheet = true }
                     )
 
-                    // 5. Category Filters Row
-                    Spacer(modifier = Modifier.height(28.dp))
-                    CategoryFiltersRow(
-                        categories = CATEGORIES,
-                        selectedCategoryId = selectedCategoryId,
-                        onSelectCategory = { category ->
-                            selectedCategoryId = category.id
-                            category.platform?.let { viewModel.onPlatformChanged(it) }
-                            if (promptText.isBlank()) {
-                                promptText = category.defaultPromptHint
-                                viewModel.onPromptChanged(category.defaultPromptHint)
-                            }
-                        },
-                        isMobile = isMobile
-                    )
-
-                    // 6. Bottom: "Try an example prompt" with refresh icon
-                    Spacer(modifier = Modifier.height(32.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                refreshRotation += 360f
-                                promptSetIndex++
-                            }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                            .testTag("refresh_example_prompts_button")
-                    ) {
-                        Text(
-                            text = "Try an example prompt",
-                            fontFamily = InterFontFamily,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            fontWeight = FontWeight.Normal
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        val animatedAngle by animateFloatAsState(
-                            targetValue = refreshRotation,
-                            animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
-                            label = "refreshAngle"
-                        )
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh example prompts",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier
-                                .size(14.dp)
-                                .rotate(animatedAngle)
-                        )
-                    }
-
-                    // 7. Example Pills: 3 outlined pills
-                    Spacer(modifier = Modifier.height(14.dp))
-                    ExamplePillsRow(
-                        prompts = currentExamplePills,
-                        onSelectPrompt = { selectedPrompt ->
-                            promptText = selectedPrompt
-                            viewModel.onPromptChanged(selectedPrompt)
-                            if (selectedPrompt.equals("AI chat assistant", ignoreCase = true)) {
-                                showChatSheet = true
-                            }
-                        },
-                        isMobile = isMobile
-                    )
                 }
             }
         }
     }
+        }
+    ) // End ModalNavigationDrawer
+
 
     // Plus Menu Bottom Sheet
     if (showPlusMenuSheet) {
