@@ -867,7 +867,7 @@ private fun MainInputBar(
                         ) {
                             // Provider emoji/icon
                             Text(
-                                text = providerEmoji(activeProviderId),
+                                text = providerInitial(activeProviderId),
                                 fontSize = 13.sp
                             )
                             Spacer(modifier = Modifier.width(5.dp))
@@ -988,17 +988,17 @@ private fun MainInputBar(
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-/** Single emoji representative of each known provider */
-private fun providerEmoji(providerId: String): String = when (providerId.lowercase()) {
-    "gemini" -> "✦"
-    "openai" -> "⚡"
-    "anthropic", "claude" -> "◆"
-    "groq" -> "⚙"
-    "deepseek" -> "🔮"
-    "openrouter" -> "🌐"
-    "mistral" -> "🌟"
-    "ollama", "local_tunnel" -> "🖥"
-    else -> "🤖"
+/** Short branded text initial for each known provider */
+private fun providerInitial(providerId: String): String = when (providerId.lowercase()) {
+    "gemini"                    -> "G"
+    "openai"                    -> "AI"
+    "anthropic", "claude"       -> "C"
+    "groq"                      -> "GQ"
+    "deepseek"                  -> "DS"
+    "openrouter"                -> "OR"
+    "mistral"                   -> "M"
+    "ollama", "local_tunnel"    -> "OL"
+    else                        -> "AI"
 }
 
 /** Converts a long model ID into a compact display string */
@@ -1139,7 +1139,7 @@ private fun ModelSelectorBottomSheet(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = providerEmoji(provider.id),
+                                    text = providerInitial(provider.id),
                                     fontSize = 20.sp
                                 )
                             }
