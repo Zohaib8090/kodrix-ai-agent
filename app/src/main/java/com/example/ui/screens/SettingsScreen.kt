@@ -673,12 +673,13 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        // Manage Providers cards: Gemini, OpenAI, Claude, Groq, OpenAI Compatible
                         state.providers.forEach { provider ->
                             ProviderManagementCard(
                                 provider = provider,
                                 isVerifying = state.verifyingProviderId == provider.id,
+                                isFetchingModels = state.fetchingModelsForProviderId == provider.id,
                                 onToggleEnabled = { enabled -> viewModel.toggleProviderEnabled(provider.id, enabled) },
+                                onToggleVision = { enabled -> viewModel.toggleProviderVision(provider.id, enabled) },
                                 onUpdateApiKey = { key -> viewModel.updateProviderApiKey(provider.id, key) },
                                 onUpdateModel = { model -> viewModel.updateProviderModel(provider.id, model) },
                                 onUpdateBaseUrl = { url -> viewModel.updateProviderBaseUrl(provider.id, url) },
@@ -686,7 +687,8 @@ fun SettingsScreen(
                                 onAddCustomThinkingLevel = { level -> viewModel.addCustomThinkingLevel(provider.id, level) },
                                 onInspectJson = { inspectingProvider = provider },
                                 onDelete = { viewModel.deleteCustomProvider(provider.id) },
-                                onVerify = { viewModel.verifyProvider(provider.id) }
+                                onVerify = { viewModel.verifyProvider(provider.id) },
+                                onFetchModels = { viewModel.fetchProviderModels(provider.id) }
                             )
                         }
 
@@ -2040,7 +2042,9 @@ private fun KodrixChipGroup(
 private fun ProviderManagementCard(
     provider: ProviderConfig,
     isVerifying: Boolean,
+    isFetchingModels: Boolean = false,
     onToggleEnabled: (Boolean) -> Unit,
+    onToggleVision: (Boolean) -> Unit,
     onUpdateApiKey: (String) -> Unit,
     onUpdateModel: (String) -> Unit,
     onUpdateBaseUrl: (String) -> Unit,
@@ -2048,7 +2052,8 @@ private fun ProviderManagementCard(
     onAddCustomThinkingLevel: (String) -> Unit,
     onInspectJson: () -> Unit,
     onDelete: () -> Unit,
-    onVerify: () -> Unit
+    onVerify: () -> Unit,
+    onFetchModels: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     var apiKeyText by remember(provider.apiKey) { mutableStateOf(provider.apiKey) }
@@ -2232,25 +2237,50 @@ private fun ProviderManagementCard(
 
                     // Models selector & Custom Model ID
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Model: ${provider.defaultModel}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        // Models & Fetch
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Model: ${provider.defaultModel.ifBlank { "Not set" }}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
 
-                        if (provider.availableModels.isNotEmpty()) {
-                            KodrixChipGroup(
-                                options = provider.availableModels,
-                                selectedOption = provider.defaultModel,
-                                onSelect = onUpdateModel
-                            )
+                                OutlinedButton(
+                                    onClick = onFetchModels,
+                                    enabled = !isFetchingModels && provider.apiKey.isNotBlank(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    if (isFetchingModels) {
+                                        CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Fetching...", fontSize = 11.sp)
+                                    } else {
+                                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Fetch Models", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            if (provider.availableModels.isNotEmpty()) {
+                                Text(
+                                    text = "${provider.availableModels.size} models available — tap to select:",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                KodrixChipGroup(
+                                    options = provider.availableModels,
+                                    selectedOption = provider.defaultModel,
+                                    onSelect = onUpdateModel
+                                )
+                            }
                         }
 
                         var customModelInput by remember(provider.id) { mutableStateOf("") }
@@ -2442,6 +2472,47 @@ private fun ProviderManagementCard(
                             Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Inspect / Edit JSON", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+
+                        // Vision Support Toggle
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = null,
+                                    tint = if (provider.supportsVision) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "Vision Support",
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (provider.supportsVision) "Image attachments enabled" else "Disabled",
+                                        fontSize = 10.sp,
+                                        color = if (provider.supportsVision) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = provider.supportsVision,
+                                onCheckedChange = { onToggleVision(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                )
+                            )
                         }
 
                         Row(

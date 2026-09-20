@@ -14,4 +14,5 @@ interface AiProvider {
     suspend fun fixError(log: String, sourceFiles: List<SourceFile>, screenshot: ByteArray? = null): Result<CodeArtifact>
     suspend fun chat(systemPrompt: String, userPrompt: String): Result<String>
     suspend fun verify(): VerifyResult
+    suspend fun fetchAvailableModels(): Result<List<String>>
 }

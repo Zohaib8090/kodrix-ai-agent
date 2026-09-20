@@ -97,6 +97,28 @@ class GeminiProvider(config: ProviderConfig) : BaseAiProvider(config) {
             VerifyResult(providerId, false, "Connection error: ${e.localizedMessage}")
         }
     }
+
+    override suspend fun fetchAvailableModels(): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            if (config.apiKey.isBlank()) return@withContext Result.failure(Exception("Gemini API key is required"))
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=${config.apiKey.trim()}"
+            val request = Request.Builder().url(url).get().build()
+            val response = client.newCall(request).execute()
+            val respStr = response.body?.string() ?: ""
+            if (!response.isSuccessful) return@withContext Result.failure(Exception("HTTP ${response.code}: $respStr"))
+            val modelsArr = JSONObject(respStr).optJSONArray("models")
+            val models = mutableListOf<String>()
+            if (modelsArr != null) {
+                for (i in 0 until modelsArr.length()) {
+                    val name = modelsArr.optJSONObject(i)?.optString("name")?.removePrefix("models/") ?: continue
+                    if (name.isNotBlank()) models.add(name)
+                }
+            }
+            Result.success(models.sorted())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
 
 class OpenAiProvider(config: ProviderConfig) : BaseAiProvider(config) {

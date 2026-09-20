@@ -3,7 +3,10 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -51,6 +54,8 @@ import com.example.ui.theme.LandingPeachHover
 import com.example.ui.viewmodel.ProjectWorkspaceViewModel
 import com.example.ui.viewmodel.WorkspaceBottomNav
 import com.example.ui.viewmodel.WorkspaceChatMessage
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -498,6 +503,13 @@ private fun AiChatTab(
     var sessionToDelete by remember { mutableStateOf<ProjectChatSession?>(null) }
     var showNewChatDialog by remember { mutableStateOf(false) }
     var newChatTitleInput by remember { mutableStateOf("") }
+    var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        attachedImageUri = uri
+    }
 
     fun copyTextToClipboard(label: String, text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -916,107 +928,170 @@ private fun AiChatTab(
             tonalElevation = 6.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                OutlinedTextField(
-                    value = promptInput,
-                    onValueChange = { promptInput = it },
-                    placeholder = {
-                        Text(
-                            if (isOnboarding) "Reply to Kodrix..." else "Ask AI to code changes or add features...",
-                            fontFamily = InterFontFamily,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("ai_refine_input"),
-                    textStyle = TextStyle(
-                        fontFamily = InterFontFamily,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    ),
-                    maxLines = 3
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-
-                val isAiActiveCurrent = isAiRefining || isOnboardingThinking || isGenerating
-                if (isAiActiveCurrent) {
-                    IconButton(
-                        onClick = onStopResponse,
+                // Attachment preview strip
+                if (attachedImageUri != null) {
+                    Row(
                         modifier = Modifier
-                            .size(44.dp)
-                            .shadow(4.dp, CircleShape, spotColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.error)
-                            .testTag("ai_stop_button")
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Stop,
-                            contentDescription = "Stop Response",
-                            tint = MaterialTheme.colorScheme.onError
-                        )
-                    }
-                } else {
-                    val isSendEnabled = promptInput.isNotBlank()
-                    IconButton(
-                        onClick = {
-                            if (promptInput.isNotBlank()) {
-                                val text = promptInput.trim()
-                                promptInput = ""
-                                if (isOnboarding) {
-                                    onSendOnboardingReply(text)
-                                } else {
-                                    onSendMessage(text)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Box {
+                                AsyncImage(
+                                    model = attachedImageUri,
+                                    contentDescription = "Attachment",
+                                    modifier = Modifier.size(56.dp),
+                                    contentScale = ContentScale.Crop
+                                )
+                                IconButton(
+                                    onClick = { attachedImageUri = null },
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .align(Alignment.TopEnd)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove attachment",
+                                        modifier = Modifier.size(12.dp),
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             }
-                        },
-                        enabled = isSendEnabled,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .shadow(
-                                elevation = if (isSendEnabled) 4.dp else 1.dp,
-                                shape = CircleShape,
-                                spotColor = if (isSendEnabled) LandingPeach.copy(alpha = 0.6f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                            )
-                            .clip(CircleShape)
-                            .background(
-                                if (isSendEnabled) LandingPeach
-                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                            )
-                            .border(
-                                width = 1.5.dp,
-                                color = if (isSendEnabled) Color(0xFFFFE5DD) else MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
-                                shape = CircleShape
-                            )
-                            .testTag("ai_refine_send_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            tint = if (isSendEnabled) Color(0xFF1E1E1E)
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                        }
+                        Text(
+                            text = "Image attached",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            }
-        }
-    }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Attachment button
+                    IconButton(
+                        onClick = { imagePickerLauncher.launch("image/*") },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AttachFile,
+                            contentDescription = "Attach image",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    OutlinedTextField(
+                        value = promptInput,
+                        onValueChange = { promptInput = it },
+                        placeholder = {
+                            Text(
+                                if (isOnboarding) "Reply to Kodrix..." else "Ask AI to code changes or add features...",
+                                fontFamily = InterFontFamily,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("ai_refine_input"),
+                        textStyle = TextStyle(
+                            fontFamily = InterFontFamily,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
+                        maxLines = 3
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    val isAiActiveCurrent = isAiRefining || isOnboardingThinking || isGenerating
+                    if (isAiActiveCurrent) {
+                        IconButton(
+                            onClick = onStopResponse,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .shadow(4.dp, CircleShape, spotColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.error)
+                                .testTag("ai_stop_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stop,
+                                contentDescription = "Stop Response",
+                                tint = MaterialTheme.colorScheme.onError
+                            )
+                        }
+                    } else {
+                        val isSendEnabled = promptInput.isNotBlank() || attachedImageUri != null
+                        IconButton(
+                            onClick = {
+                                if (promptInput.isNotBlank() || attachedImageUri != null) {
+                                    val text = promptInput.trim()
+                                    promptInput = ""
+                                    attachedImageUri = null
+                                    if (isOnboarding) {
+                                        onSendOnboardingReply(text)
+                                    } else {
+                                        onSendMessage(text)
+                                    }
+                                }
+                            },
+                            enabled = isSendEnabled,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .shadow(
+                                    elevation = if (isSendEnabled) 4.dp else 1.dp,
+                                    shape = CircleShape,
+                                    spotColor = if (isSendEnabled) LandingPeach.copy(alpha = 0.6f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                )
+                                .clip(CircleShape)
+                                .background(
+                                    if (isSendEnabled) LandingPeach
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                )
+                                .border(
+                                    width = 1.5.dp,
+                                    color = if (isSendEnabled) Color(0xFFFFE5DD) else MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
+                                    shape = CircleShape
+                                )
+                                .testTag("ai_refine_send_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
+                                tint = if (isSendEnabled) Color(0xFF1E1E1E)
+                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                } // end inner Row
+            } // end Column
+        } // end Surface
+    } // end outer Column
 
     // Modal Action Sheet for Selected Prompt (on hold / tap options)
     selectedPromptActionMessage?.let { selectedMsg ->

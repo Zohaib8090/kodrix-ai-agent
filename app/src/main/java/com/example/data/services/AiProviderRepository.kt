@@ -43,6 +43,19 @@ class AiProviderRepository(
         return result
     }
 
+    suspend fun fetchModels(providerId: String): Result<List<String>> {
+        val config = getProviderConfig(providerId)
+            ?: return Result.failure(Exception("Provider not found"))
+        val provider = AiProviderFactory.create(config)
+        val result = provider.fetchAvailableModels()
+        if (result.isSuccess) {
+            val models = result.getOrThrow()
+            val updated = config.copy(availableModels = models)
+            preferenceStorage.updateProvider(updated)
+        }
+        return result
+    }
+
     suspend fun generateCode(
         providerId: String,
         prompt: String,

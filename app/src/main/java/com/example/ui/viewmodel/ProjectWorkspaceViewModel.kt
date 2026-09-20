@@ -297,17 +297,6 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                     updatedAt = System.currentTimeMillis()
                 )
                 db.projectChatDao().insertSession(initialSession)
-                if (record.prompt.isNotBlank()) {
-                    val userInitMsg = ProjectChatMessage(
-                        id = UUID.randomUUID().toString(),
-                        sessionId = initialSession.id,
-                        projectId = projectId,
-                        sender = "USER",
-                        message = record.prompt,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    db.projectChatDao().insertMessage(userInitMsg)
-                }
                 initialSession
             } else {
                 directSessions.first()

@@ -184,10 +184,14 @@ abstract class BaseAiProvider(
         val respBody = response.body?.string() ?: ""
 
         if (response.isSuccessful) {
-            val json = JSONObject(respBody)
-            val choices = json.optJSONArray("choices")
-            val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content") ?: ""
-            return Result.success(content)
+            return try {
+                val json = JSONObject(respBody)
+                val choices = json.optJSONArray("choices")
+                val content = choices?.optJSONObject(0)?.optJSONObject("message")?.optString("content") ?: ""
+                Result.success(content)
+            } catch (e: Exception) {
+                Result.failure(Exception("Invalid JSON from API: $respBody", e))
+            }
         } else {
             return Result.failure(Exception("AI API error: HTTP ${response.code} $respBody"))
         }
@@ -196,6 +200,51 @@ abstract class BaseAiProvider(
     override suspend fun chat(systemPrompt: String, userPrompt: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             callAiModel(systemPrompt, userPrompt)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun fetchAvailableModels(): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val baseUrl = config.baseUrl.ifEmpty { "https://api.openai.com/v1" }.trimEnd('/')
+            val url = "$baseUrl/models"
+            val request = buildAuthorizedRequest(url, "GET")
+            val response = client.newCall(request).execute()
+            val respBody = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("HTTP ${response.code}: $respBody"))
+            }
+
+            val json = try { JSONObject(respBody) } catch (e: Exception) {
+                return@withContext Result.failure(Exception("Invalid JSON response: $respBody"))
+            }
+
+            // Standard OpenAI format: { "data": [ { "id": "gpt-4o" }, ... ] }
+            val dataArray = json.optJSONArray("data")
+            if (dataArray != null) {
+                val models = mutableListOf<String>()
+                for (i in 0 until dataArray.length()) {
+                    val id = dataArray.optJSONObject(i)?.optString("id") ?: continue
+                    if (id.isNotBlank()) models.add(id)
+                }
+                return@withContext Result.success(models.sorted())
+            }
+
+            // Gemini format: { "models": [ { "name": "models/gemini-1.5-pro" }, ... ] }
+            val modelsArray = json.optJSONArray("models")
+            if (modelsArray != null) {
+                val models = mutableListOf<String>()
+                for (i in 0 until modelsArray.length()) {
+                    val obj = modelsArray.optJSONObject(i) ?: continue
+                    val name = obj.optString("name").removePrefix("models/")
+                    if (name.isNotBlank()) models.add(name)
+                }
+                return@withContext Result.success(models.sorted())
+            }
+
+            Result.failure(Exception("No models found in response"))
         } catch (e: Exception) {
             Result.failure(e)
         }

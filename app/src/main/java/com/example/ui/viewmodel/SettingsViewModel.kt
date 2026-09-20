@@ -49,6 +49,8 @@ data class SettingsUiState(
     val defaultProvider: String = "Gemini",
     val providers: List<ProviderConfig> = emptyList(),
     val verifyingProviderId: String? = null,
+    val fetchingModelsForProviderId: String? = null,
+    val fetchModelsError: String? = null,
 
     // Category 4: Projects & Storage
     val defaultProjectLocation: String = "/Kodrix/",
@@ -254,6 +256,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun toggleProviderEnabled(providerId: String, isEnabled: Boolean) {
         val updated = _state.value.providers.map {
             if (it.id == providerId) it.copy(isEnabled = isEnabled) else it
+        }
+        prefs.saveProviders(updated)
+        _state.value = _state.value.copy(providers = updated)
+        triggerHaptic()
+    }
+
+    fun toggleProviderVision(providerId: String, supportsVision: Boolean) {
+        val updated = _state.value.providers.map {
+            if (it.id == providerId) it.copy(supportsVision = supportsVision) else it
         }
         prefs.saveProviders(updated)
         _state.value = _state.value.copy(providers = updated)
@@ -543,6 +554,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             _state.value = _state.value.copy(
                 providers = updatedList,
                 verifyingProviderId = null
+            )
+            triggerHaptic()
+        }
+    }
+
+    fun fetchProviderModels(providerId: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(fetchingModelsForProviderId = providerId, fetchModelsError = null)
+            val result = aiRepo.fetchModels(providerId)
+            val updatedList = prefs.getProviders()
+            _state.value = _state.value.copy(
+                providers = updatedList,
+                fetchingModelsForProviderId = null,
+                fetchModelsError = result.exceptionOrNull()?.message
             )
             triggerHaptic()
         }
