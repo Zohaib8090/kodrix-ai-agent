@@ -194,7 +194,11 @@ abstract class BaseAiProvider(
     }
 
     override suspend fun chat(systemPrompt: String, userPrompt: String): Result<String> = withContext(Dispatchers.IO) {
-        callAiModel(systemPrompt, userPrompt)
+        try {
+            callAiModel(systemPrompt, userPrompt)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     private fun buildSystemPrompt(context: AppContext): String {
