@@ -1857,6 +1857,7 @@ private fun KodrixSegmentedButton(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(3.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -1866,7 +1867,7 @@ private fun KodrixSegmentedButton(
                     onClick = { onSelect(item) },
                     shape = RoundedCornerShape(8.dp),
                     color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
                 ) {
                     Text(
                         text = item,
@@ -1876,8 +1877,7 @@ private fun KodrixSegmentedButton(
                         color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(vertical = 7.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                     )
                 }
             }
