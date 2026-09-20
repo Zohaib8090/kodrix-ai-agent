@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -355,6 +356,20 @@ fun DashboardScreen(
         )
     }
 
+    // Refresh providers when returning to this screen (e.g., from Settings)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.loadProvidersAndDefaults()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     // Synchronize if external change
     LaunchedEffect(state.prompt) {
         if (state.prompt != promptText) {
@@ -411,23 +426,15 @@ fun DashboardScreen(
                     fontWeight = FontWeight.SemiBold
                 )
                 
-                CATEGORIES.forEach { category ->
-                    NavigationDrawerItem(
-                        icon = { Icon(category.icon, contentDescription = null) },
-                        label = { Text(category.label, fontFamily = InterFontFamily) },
-                        selected = selectedCategoryId == category.id,
-                        onClick = {
-                            selectedCategoryId = category.id
-                            category.platform?.let { viewModel.onPlatformChanged(it) }
-                            if (promptText.isBlank()) {
-                                promptText = category.defaultPromptHint
-                                viewModel.onPromptChanged(category.defaultPromptHint)
-                            }
-                            coroutineScope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                    )
-                }
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.Build, contentDescription = null) },
+                    label = { Text("Build", fontFamily = InterFontFamily, fontWeight = FontWeight.SemiBold) },
+                    selected = false,
+                    onClick = {
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
             }
         },
         content = {

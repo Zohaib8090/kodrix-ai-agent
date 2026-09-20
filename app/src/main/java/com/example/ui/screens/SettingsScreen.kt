@@ -115,6 +115,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -148,7 +149,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    var selectedCategoryFilter by remember { mutableStateOf("All") }
+    var selectedSection by remember { mutableStateOf<String?>(null) }
     var showAddCustomProviderDialog by remember { mutableStateOf(false) }
     var showLogsDialog by remember { mutableStateOf(false) }
     var inspectingProvider by remember { mutableStateOf<ProviderConfig?>(null) }
@@ -197,16 +198,18 @@ fun SettingsScreen(
         Toast.makeText(context, "Full WebView permissions updated!", Toast.LENGTH_SHORT).show()
     }
 
-    val categories = listOf(
-        "All",
-        "Permissions",
-        "Appearance",
-        "Editor",
-        "AI & Models",
-        "Storage",
-        "Build & Deploy",
-        "Preview",
-        "Terminal"
+
+    // Section metadata for the hub menu
+    data class SettingsSectionInfo(val id: String, val title: String, val subtitle: String, val icon: ImageVector)
+    val sectionsList = listOf(
+        SettingsSectionInfo("Permissions", "Permissions", "Camera, microphone, notifications", Icons.Default.Security),
+        SettingsSectionInfo("Appearance", "Appearance", "Theme, fonts, colors", Icons.Default.Palette),
+        SettingsSectionInfo("Editor", "Editor", "Code editor preferences", Icons.Default.Code),
+        SettingsSectionInfo("AI & Models", "AI & Models", "Providers, API keys, models", Icons.Default.AutoAwesome),
+        SettingsSectionInfo("Storage", "Storage", "Projects, files, disk usage", Icons.Default.Folder),
+        SettingsSectionInfo("Build & Deploy", "Build & Deploy", "Build system and deployment", Icons.Default.Build),
+        SettingsSectionInfo("Preview", "Preview", "Live preview and browser", Icons.Default.Computer),
+        SettingsSectionInfo("Terminal", "Terminal", "Embedded terminal settings", Icons.Default.Terminal)
     )
 
     Scaffold(
@@ -234,7 +237,7 @@ fun SettingsScreen(
                             }
                         }
                         Text(
-                            text = "Settings",
+                            text = if (selectedSection != null) selectedSection!! else "Settings",
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
@@ -244,7 +247,13 @@ fun SettingsScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onNavigateBack,
+                        onClick = {
+                            if (selectedSection != null) {
+                                selectedSection = null
+                            } else {
+                                onNavigateBack()
+                            }
+                        },
                         modifier = Modifier.testTag("settings_back_button")
                     ) {
                         Icon(
@@ -261,52 +270,94 @@ fun SettingsScreen(
         },
         modifier = modifier.fillMaxSize()
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Category navigation pills
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                categories.forEach { category ->
-                    val isSelected = selectedCategoryFilter == category
-                    Surface(
-                        onClick = { selectedCategoryFilter = category },
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        modifier = Modifier.testTag("filter_$category")
-                    ) {
-                        Text(
-                            text = category,
-                            fontFamily = InterFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
+            if (selectedSection == null) {
+                // Hub: show the menu of sections
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Choose a category",
+                        fontFamily = InterFontFamily,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    sectionsList.forEach { section ->
+                        Card(
+                            onClick = { selectedSection = section.id },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_section_${section.id}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = section.icon,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = section.title,
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = section.subtitle,
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp).rotate(-90f)
+                                )
+                            }
+                        }
                     }
                 }
-            }
+            } else {
+                // Sub-screen: show only the selected section's content
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-
-            // Main Settings Content
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
                 // CATEGORY: Permissions & WebView Browser
-                if (selectedCategoryFilter in listOf("All", "Permissions")) {
+                if (selectedSection == "Permissions") {
                     CategorySection(
                         title = "Permissions & WebView Browser",
                         icon = Icons.Default.Security
@@ -438,7 +489,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 1: Appearance
-                if (selectedCategoryFilter in listOf("All", "Appearance")) {
+                if (selectedSection == "Appearance") {
                     CategorySection(
                         title = "CATEGORY 1: Appearance",
                         icon = Icons.Default.Palette
@@ -502,7 +553,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 2: Editor & Workspace
-                if (selectedCategoryFilter in listOf("All", "Editor")) {
+                if (selectedSection == "Editor") {
                     CategorySection(
                         title = "CATEGORY 2: Editor & Workspace",
                         icon = Icons.Default.Code
@@ -598,7 +649,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 3: AI & Models
-                if (selectedCategoryFilter in listOf("All", "AI & Models")) {
+                if (selectedSection == "AI & Models") {
                     CategorySection(
                         title = "CATEGORY 3: AI & Models",
                         icon = Icons.Default.AutoAwesome
@@ -660,7 +711,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 4: Projects & Storage
-                if (selectedCategoryFilter in listOf("All", "Storage")) {
+                if (selectedSection == "Storage") {
                     CategorySection(
                         title = "CATEGORY 4: Projects & Storage",
                         icon = Icons.Default.Folder
@@ -754,7 +805,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 5: Build & Deploy
-                if (selectedCategoryFilter in listOf("All", "Build & Deploy")) {
+                if (selectedSection == "Build & Deploy") {
                     CategorySection(
                         title = "CATEGORY 5: Build & Deploy",
                         icon = Icons.Default.Build
@@ -866,7 +917,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 6: Preview & Debug Logs
-                if (selectedCategoryFilter in listOf("All", "Preview")) {
+                if (selectedSection == "Preview") {
                     CategorySection(
                         title = "CATEGORY 6: Preview & Debug Logs",
                         icon = Icons.Default.Computer
@@ -944,7 +995,7 @@ fun SettingsScreen(
                 }
 
                 // CATEGORY 7: Terminal & Environment
-                if (selectedCategoryFilter in listOf("All", "Terminal")) {
+                if (selectedSection == "Terminal") {
                     CategorySection(
                         title = "CATEGORY 7: Terminal & Environment",
                         icon = Icons.Default.Terminal
@@ -1018,7 +1069,7 @@ fun SettingsScreen(
                                     )
                                 }
                                 Text(
-                                    text = "• Web = Local Termux Linux + Node + localhost WebView + auto logs to AI\n• APK = GitHub Actions workflow auto-generated + push = APK artifact",
+                                    text = "â€¢ Web = Local Termux Linux + Node + localhost WebView + auto logs to AI\nâ€¢ APK = GitHub Actions workflow auto-generated + push = APK artifact",
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 12.sp,
                                     lineHeight = 18.sp,
@@ -1028,9 +1079,10 @@ fun SettingsScreen(
                         }
                     }
                 }
-            }
-        }
-    }
+                } // Close scrollable Column
+            } // Close else block
+        } // Close outer Column
+    } // Close Scaffold
 
     // Modal: Add Custom Provider Dialog
     if (showAddCustomProviderDialog) {
@@ -1506,7 +1558,7 @@ fun SettingsScreen(
                                         )
                                     }
                                     Text(
-                                        text = "${record.platform} • ${record.framework}",
+                                        text = "${record.platform} â€¢ ${record.framework}",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -2053,7 +2105,7 @@ private fun ProviderManagementCard(
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                                 ) {
                                     Text(
-                                        text = "🧠 ${provider.thinkingLevel.uppercase()}",
+                                        text = "ðŸ§  ${provider.thinkingLevel.uppercase()}",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -2642,4 +2694,5 @@ private fun PermissionToggleRow(
         }
     }
 }
+
 

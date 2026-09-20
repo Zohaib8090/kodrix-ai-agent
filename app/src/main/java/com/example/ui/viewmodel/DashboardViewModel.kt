@@ -78,7 +78,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         loadProvidersAndDefaults()
     }
 
-    private fun loadProvidersAndDefaults() {
+    fun loadProvidersAndDefaults() {
         val providers = prefs.getProviders()
         val codegenId = prefs.selectedCodegenProviderId.ifEmpty { "gemini" }
         val fixId = prefs.selectedFixProviderId.ifEmpty { "gemini" }
