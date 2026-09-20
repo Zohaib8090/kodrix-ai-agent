@@ -48,7 +48,11 @@ data class DashboardUiState(
     val isGeneratingPreview: Boolean = false,
     val isLaunchingBuild: Boolean = false,
     val launchedBuildId: String? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** The currently active provider id for the model selector chip */
+    val activeProviderId: String = "gemini",
+    /** The currently active model name for the model selector chip */
+    val activeModel: String = "gemini-2.5-flash"
 )
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
@@ -88,15 +92,52 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             ?: codegenId
         _chatProviderId.value = bestChatProvider
 
+        // Restore persisted model selector choice
+        val savedChoice = prefs.selectedActiveModel  // "providerId::modelName" or ""
+        val (restoredProvider, restoredModel) = if (savedChoice.contains("::")) {
+            val parts = savedChoice.split("::", limit = 2)
+            parts[0] to parts[1]
+        } else {
+            val defaultProvider = providers.firstOrNull { it.id == codegenId } ?: providers.firstOrNull()
+            val pid = defaultProvider?.id ?: "gemini"
+            val model = defaultProvider?.defaultModel ?: "gemini-2.5-flash"
+            pid to model
+        }
+
         _state.value = _state.value.copy(
             availableProviders = providers,
             selectedCodegenProviderId = codegenId,
-            selectedFixProviderId = fixId
+            selectedFixProviderId = fixId,
+            activeProviderId = restoredProvider,
+            activeModel = restoredModel
         )
         refreshPreview()
     }
 
     fun selectChatProvider(providerId: String) {
+        _chatProviderId.value = providerId
+    }
+
+    /**
+     * Called from the Model Selector bottom sheet when the user picks a provider+model.
+     * Persists the choice and drives code generation provider accordingly.
+     */
+    fun selectModel(providerId: String, modelName: String) {
+        prefs.selectedActiveModel = "$providerId::$modelName"
+        // Update the provider's defaultModel so it's used at code generation time
+        val providers = _state.value.availableProviders.toMutableList()
+        val idx = providers.indexOfFirst { it.id == providerId }
+        if (idx >= 0) {
+            providers[idx] = providers[idx].copy(defaultModel = modelName)
+            prefs.saveProviders(providers)
+        }
+        _state.value = _state.value.copy(
+            activeProviderId = providerId,
+            activeModel = modelName,
+            selectedCodegenProviderId = providerId,
+            availableProviders = providers
+        )
+        prefs.selectedCodegenProviderId = providerId
         _chatProviderId.value = providerId
     }
 

@@ -28,13 +28,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoAwesome
@@ -64,6 +67,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -72,6 +76,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.R
 import com.example.data.model.PlatformType
+import com.example.data.model.ProviderConfig
 import com.example.data.model.WebFramework
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AiChatMessage
@@ -151,6 +156,7 @@ fun DashboardScreen(
     var refreshRotation by remember { mutableFloatStateOf(0f) }
     var showPlusMenuSheet by remember { mutableStateOf(false) }
     var showChatSheet by remember { mutableStateOf(false) }
+    var showModelPickerSheet by remember { mutableStateOf(false) }
 
     // Clone GitHub Dialog state
     var showCloneDialog by remember { mutableStateOf(false) }
@@ -482,7 +488,10 @@ fun DashboardScreen(
                         isLaunching = state.isLaunchingBuild,
                         isMobile = isMobile,
                         attachedFiles = attachedFiles,
-                        onRemoveFile = { uri -> attachedFiles = attachedFiles - uri }
+                        onRemoveFile = { uri -> attachedFiles = attachedFiles - uri },
+                        activeProviderId = state.activeProviderId,
+                        activeModel = state.activeModel,
+                        onOpenModelPicker = { showModelPickerSheet = true }
                     )
 
                     // 5. Category Filters Row
@@ -647,6 +656,20 @@ fun DashboardScreen(
             onDismiss = { showChatSheet = false }
         )
     }
+
+    // Model / Provider Selector Bottom Sheet
+    if (showModelPickerSheet) {
+        ModelSelectorBottomSheet(
+            providers = state.availableProviders,
+            activeProviderId = state.activeProviderId,
+            activeModel = state.activeModel,
+            onSelectModel = { providerId, model ->
+                viewModel.selectModel(providerId, model)
+                showModelPickerSheet = false
+            },
+            onDismiss = { showModelPickerSheet = false }
+        )
+    }
 }
 
 /**
@@ -663,7 +686,10 @@ private fun MainInputBar(
     isLaunching: Boolean,
     isMobile: Boolean,
     attachedFiles: List<Uri> = emptyList(),
-    onRemoveFile: (Uri) -> Unit = {}
+    onRemoveFile: (Uri) -> Unit = {},
+    activeProviderId: String = "gemini",
+    activeModel: String = "gemini-2.5-flash",
+    onOpenModelPicker: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -794,7 +820,7 @@ private fun MainInputBar(
                 }
             }
 
-            // Bottom bar: "+" on left, peach submit button on right
+            // Bottom bar: "+" on left, model chip + peach submit button on right
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -817,92 +843,418 @@ private fun MainInputBar(
                     )
                 }
 
-                // Bottom-right: circular peach/orange submit button (44x44px, #F9AD94)
-                val isButtonEnabled = promptText.isNotBlank() && !isLaunching
-
-                val submitInteractionSource = remember { MutableInteractionSource() }
-                val isPressed by submitInteractionSource.collectIsPressedAsState()
-                val isHovered by submitInteractionSource.collectIsHoveredAsState()
-
-                val buttonScale by animateFloatAsState(
-                    targetValue = when {
-                        isPressed -> 0.90f
-                        isHovered -> 1.08f
-                        isButtonEnabled -> 1.02f
-                        else -> 1f
-                    },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow
-                    ),
-                    label = "submitScale"
-                )
-
-                // Highlighted button styling: In dark theme, ensures high visibility, luminous glow, and crisp contrast
-                val buttonBg = when {
-                    isButtonEnabled && (isHovered || isPressed) -> LandingPeachHover
-                    isButtonEnabled -> LandingPeach
-                    isFocused || isHovered -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                    else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                }
-
-                val buttonBorder = when {
-                    isButtonEnabled -> BorderStroke(1.5.dp, Color(0xFFFFE5DD))
-                    isFocused || isHovered -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
-                    else -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.50f))
-                }
-
-                val arrowIconTint = when {
-                    isButtonEnabled -> Color(0xFF1E1E1E)
-                    isFocused || isHovered -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-                }
-
-                val buttonElevation by animateDpAsState(
-                    targetValue = when {
-                        isButtonEnabled && isHovered -> 8.dp
-                        isButtonEnabled -> 4.dp
-                        isFocused || isHovered -> 3.dp
-                        else -> 1.dp
-                    },
-                    label = "submitElevation"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .scale(buttonScale)
-                        .shadow(
-                            elevation = buttonElevation,
-                            shape = CircleShape,
-                            spotColor = if (isButtonEnabled) LandingPeach.copy(alpha = 0.65f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            ambientColor = Color(0x20000000)
-                        )
-                        .clip(CircleShape)
-                        .background(buttonBg)
-                        .border(buttonBorder, CircleShape)
-                        .clickable(
-                            enabled = isButtonEnabled,
-                            interactionSource = submitInteractionSource,
-                            indication = ripple(bounded = true, color = if (isButtonEnabled) Color.White else MaterialTheme.colorScheme.primary),
-                            onClick = onSubmit
-                        )
-                        .testTag("submit_peach_button"),
-                    contentAlignment = Alignment.Center
+                // Center-right: model selector chip
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    if (isLaunching) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = if (isButtonEnabled) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.primary,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Build App",
-                            tint = arrowIconTint,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    // Model selector chip
+                    val chipBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                    val chipBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+                    Surface(
+                        onClick = onOpenModelPicker,
+                        shape = RoundedCornerShape(20.dp),
+                        color = chipBg,
+                        border = BorderStroke(1.dp, chipBorder),
+                        modifier = Modifier
+                            .height(30.dp)
+                            .testTag("model_selector_chip")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        ) {
+                            // Provider emoji/icon
+                            Text(
+                                text = providerEmoji(activeProviderId),
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = shortModelName(activeModel),
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Select model",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    } // end Surface chip
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Peach submit button — inside the weight(1f) row, right-aligned
+                    val isButtonEnabled = promptText.isNotBlank() && !isLaunching
+
+                    val submitInteractionSource = remember { MutableInteractionSource() }
+                    val isPressed by submitInteractionSource.collectIsPressedAsState()
+                    val isHovered by submitInteractionSource.collectIsHoveredAsState()
+
+                    val buttonScale by animateFloatAsState(
+                        targetValue = when {
+                            isPressed -> 0.90f
+                            isHovered -> 1.08f
+                            isButtonEnabled -> 1.02f
+                            else -> 1f
+                        },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "submitScale"
+                    )
+
+                    // Highlighted button styling
+                    val buttonBg = when {
+                        isButtonEnabled && (isHovered || isPressed) -> LandingPeachHover
+                        isButtonEnabled -> LandingPeach
+                        isFocused || isHovered -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    }
+
+                    val buttonBorder = when {
+                        isButtonEnabled -> BorderStroke(1.5.dp, Color(0xFFFFE5DD))
+                        isFocused || isHovered -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                        else -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.50f))
+                    }
+
+                    val arrowIconTint = when {
+                        isButtonEnabled -> Color(0xFF1E1E1E)
+                        isFocused || isHovered -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                    }
+
+                    val buttonElevation by animateDpAsState(
+                        targetValue = when {
+                            isButtonEnabled && isHovered -> 8.dp
+                            isButtonEnabled -> 4.dp
+                            isFocused || isHovered -> 3.dp
+                            else -> 1.dp
+                        },
+                        label = "submitElevation"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .scale(buttonScale)
+                            .shadow(
+                                elevation = buttonElevation,
+                                shape = CircleShape,
+                                spotColor = if (isButtonEnabled) LandingPeach.copy(alpha = 0.65f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                                ambientColor = Color(0x20000000)
+                            )
+                            .clip(CircleShape)
+                            .background(buttonBg)
+                            .border(buttonBorder, CircleShape)
+                            .clickable(
+                                enabled = isButtonEnabled,
+                                interactionSource = submitInteractionSource,
+                                indication = ripple(bounded = true, color = if (isButtonEnabled) Color.White else MaterialTheme.colorScheme.primary),
+                                onClick = onSubmit
+                            )
+                            .testTag("submit_peach_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isLaunching) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = if (isButtonEnabled) Color(0xFF1E1E1E) else MaterialTheme.colorScheme.primary,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Build App",
+                                tint = arrowIconTint,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                } // end weight(1f) Row
+            } // end bottom bar Row
+        } // end Column
+    } // end Box
+} // end MainInputBar
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+/** Single emoji representative of each known provider */
+private fun providerEmoji(providerId: String): String = when (providerId.lowercase()) {
+    "gemini" -> "✦"
+    "openai" -> "⚡"
+    "anthropic", "claude" -> "◆"
+    "groq" -> "⚙"
+    "deepseek" -> "🔮"
+    "openrouter" -> "🌐"
+    "mistral" -> "🌟"
+    "ollama", "local_tunnel" -> "🖥"
+    else -> "🤖"
+}
+
+/** Converts a long model ID into a compact display string */
+private fun shortModelName(model: String): String {
+    return when {
+        model.contains("gemini-2.5-flash", ignoreCase = true) -> "Gemini 2.5 Flash"
+        model.contains("gemini-2.5-pro", ignoreCase = true) -> "Gemini 2.5 Pro"
+        model.contains("gemini-2.0-flash", ignoreCase = true) -> "Gemini 2.0 Flash"
+        model.contains("gemini-1.5-pro", ignoreCase = true) -> "Gemini 1.5 Pro"
+        model.contains("gemini-1.5-flash", ignoreCase = true) -> "Gemini 1.5 Flash"
+        model.contains("gpt-4o-mini", ignoreCase = true) -> "GPT-4o mini"
+        model.contains("gpt-4o", ignoreCase = true) -> "GPT-4o"
+        model.contains("o3-mini", ignoreCase = true) -> "o3-mini"
+        model.contains("o1", ignoreCase = true) && model.length <= 3 -> "o1"
+        model.contains("claude-3-7", ignoreCase = true) -> "Claude 3.7 Sonnet"
+        model.contains("claude-3-5-sonnet", ignoreCase = true) -> "Claude 3.5 Sonnet"
+        model.contains("claude-3-5-haiku", ignoreCase = true) -> "Claude 3.5 Haiku"
+        model.contains("claude-3-opus", ignoreCase = true) -> "Claude 3 Opus"
+        model.contains("llama-3.3-70b", ignoreCase = true) -> "Llama 3.3 70B"
+        model.contains("llama-3.1-8b", ignoreCase = true) -> "Llama 3.1 8B"
+        model.contains("deepseek-r1", ignoreCase = true) -> "DeepSeek R1"
+        model.contains("deepseek-chat", ignoreCase = true) -> "DeepSeek Chat"
+        model.contains("deepseek-reasoner", ignoreCase = true) -> "DeepSeek Reasoner"
+        model.contains("mixtral", ignoreCase = true) -> "Mixtral 8x7B"
+        model.isBlank() -> "Select model"
+        else -> model.substringAfterLast('/').take(22)
+    }
+}
+
+// ── ModelSelectorBottomSheet ───────────────────────────────────────────────
+
+private enum class ModelPickerStep { PROVIDERS, MODELS }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSelectorBottomSheet(
+    providers: List<ProviderConfig>,
+    activeProviderId: String,
+    activeModel: String,
+    onSelectModel: (providerId: String, model: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var step by remember { mutableStateOf(ModelPickerStep.PROVIDERS) }
+    var selectedProvider by remember { mutableStateOf<ProviderConfig?>(null) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(top = 4.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (step == ModelPickerStep.MODELS) {
+                IconButton(
+                    onClick = { step = ModelPickerStep.PROVIDERS },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to providers",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (step == ModelPickerStep.PROVIDERS) "Choose AI Provider" else selectedProvider?.name ?: "",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (step == ModelPickerStep.PROVIDERS)
+                        "Select which model powers your builds"
+                    else
+                        "Tap a model to use it",
+                    fontFamily = InterFontFamily,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+        // Step 1: Provider List
+        if (step == ModelPickerStep.PROVIDERS) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 8.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(providers) { provider ->
+                    val isActive = provider.id == activeProviderId
+                    val providerDisplayModel = if (isActive) activeModel else provider.defaultModel
+                    Surface(
+                        onClick = {
+                            selectedProvider = provider
+                            step = ModelPickerStep.MODELS
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isActive)
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = if (isActive)
+                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                        else
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Provider emoji badge
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isActive)
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        else
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = providerEmoji(provider.id),
+                                    fontSize = 20.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = provider.name,
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = shortModelName(providerDisplayModel),
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            // Models count badge
+                            if (provider.availableModels.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                ) {
+                                    Text(
+                                        text = "${provider.availableModels.size} models",
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            if (isActive) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Active provider",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Model List for selected provider
+        if (step == ModelPickerStep.MODELS) {
+            val provider = selectedProvider
+            if (provider != null) {
+                val models = provider.availableModels.ifEmpty {
+                    listOf(provider.defaultModel).filter { it.isNotBlank() }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 8.dp, bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(models) { model ->
+                        val isActiveModel = provider.id == activeProviderId && model == activeModel
+                        Surface(
+                            onClick = { onSelectModel(provider.id, model) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isActiveModel)
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = if (isActiveModel)
+                                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                            else
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = shortModelName(model),
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = model,
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                }
+                                if (isActiveModel) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

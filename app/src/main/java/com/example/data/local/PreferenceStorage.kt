@@ -47,6 +47,11 @@ class PreferenceStorage(context: Context) {
         get() = prefs.getString(KEY_FIX_PROVIDER, "gemini") ?: "gemini"
         set(value) = prefs.edit().putString(KEY_FIX_PROVIDER, value).apply()
 
+    /** Persists the active model selector choice as "providerId::modelName" */
+    var selectedActiveModel: String
+        get() = prefs.getString(KEY_SELECTED_MODEL, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_SELECTED_MODEL, value).apply()
+
     var vercelToken: String
         get() = prefs.getString(KEY_VERCEL_TOKEN, "") ?: ""
         set(value) = prefs.edit().putString(KEY_VERCEL_TOKEN, value).apply()
@@ -383,6 +388,7 @@ class PreferenceStorage(context: Context) {
         private const val KEY_PROVIDERS = "key_providers"
         private const val KEY_CODEGEN_PROVIDER = "key_codegen_provider"
         private const val KEY_FIX_PROVIDER = "key_fix_provider"
+        private const val KEY_SELECTED_MODEL = "key_selected_model"
         private const val KEY_VERCEL_TOKEN = "key_vercel_token"
         private const val KEY_NETLIFY_TOKEN = "key_netlify_token"
         private const val KEY_ONBOARDING_DONE = "key_onboarding_done"
