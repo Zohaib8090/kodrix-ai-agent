@@ -71,7 +71,7 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = if (isSuccess) "🚀 Project Ready: $projectName" else "⚠️ Build Warning: $projectName"
+        val title = if (isSuccess) "Project Ready: $projectName" else "Build Warning: $projectName"
         val message = customMessage ?: if (isSuccess) {
             "AI finished coding your project! Tap to open workspace & live preview."
         } else {

@@ -76,6 +76,7 @@ data class ProjectWorkspaceUiState(
     // Onboarding conversation state
     val isOnboarding: Boolean = false,
     val isOnboardingThinking: Boolean = false,
+    val showLinuxSubsystemPrompt: Boolean = false,
     val onboardingConversation: List<WorkspaceChatMessage> = emptyList() // full Q&A history for context
 )
 

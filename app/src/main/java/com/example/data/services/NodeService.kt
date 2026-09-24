@@ -36,15 +36,12 @@ class NodeService(private val context: Context) {
     val isRealNodeInstalled: Boolean
         get() {
             val localNode = File(usrBin, "node")
-            val termuxNode = File("/data/data/com.termux/files/usr/bin/node")
-            return (localNode.exists() && localNode.canExecute()) || (termuxNode.exists() && termuxNode.canExecute())
+            return localNode.exists() && localNode.canExecute()
         }
 
     fun getRealNodeBinary(): File? {
         val localNode = File(usrBin, "node")
         if (localNode.exists() && localNode.canExecute()) return localNode
-        val termuxNode = File("/data/data/com.termux/files/usr/bin/node")
-        if (termuxNode.exists() && termuxNode.canExecute()) return termuxNode
         return null
     }
 
@@ -112,7 +109,7 @@ class NodeService(private val context: Context) {
         setupRealEnv()
         try {
             val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
-            val newPath = "${nodeDir.absolutePath}:$currentPath:/data/data/com.termux/files/usr/bin"
+            val newPath = "${nodeDir.absolutePath}:$currentPath"
 
             val pb = ProcessBuilder("sh", "-c", command)
                 .directory(workingDir)
@@ -165,7 +162,7 @@ class NodeService(private val context: Context) {
         onOutput(">> Starting real dev server: node npm run dev -- --port $port")
         try {
             val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
-            val newPath = "${nodeDir.absolutePath}:$currentPath:/data/data/com.termux/files/usr/bin"
+            val newPath = "${nodeDir.absolutePath}:$currentPath"
 
             val pb = ProcessBuilder("sh", "-c", "npm run dev -- --port $port || true")
                 .directory(projectDir)
@@ -331,8 +328,8 @@ class RealTerminalSession(
         listOf(
             "Kodrix Linux/Termux Environment v2.0",
             "Built-in Tools: bash, sh, npm, node, git, pkg, apt, curl, wget, unzip",
-            if (embeddedTermux.isInstalled) "🟢 Embedded Termux Linux: ACTIVE (${embeddedTermux.getArchitecture()})"
-            else if (nodeService?.isRealNodeInstalled == true) "🟢 Real Native Engine: ACTIVE (ARM64)"
+            if (embeddedTermux.isInstalled) "Embedded Termux Linux: ACTIVE (${embeddedTermux.getArchitecture()})"
+            else if (nodeService?.isRealNodeInstalled == true) "Real Native Engine: ACTIVE (ARM64)"
             else "Type 'setup-termux' or 'setup-node' to initialize full embedded Linux rootfs",
             "Working Dir: ${currentDir.name}",
             "------------------------------------------------"
@@ -556,7 +553,7 @@ class RealTerminalSession(
                     else -> {
                         val nodeDir = File(context.filesDir, "nodejs")
                         val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
-                        val newPath = "${nodeDir.absolutePath}:$currentPath:/data/data/com.termux/files/usr/bin"
+                        val newPath = "${nodeDir.absolutePath}:$currentPath"
 
                         val pb = ProcessBuilder("sh", "-c", trimmed)
                             .directory(currentDir)

@@ -77,8 +77,7 @@ fun AppNavigation(
         }
 
         composable(Routes.SETTINGS) {
-            val activity = androidx.compose.ui.platform.LocalContext.current as androidx.activity.ComponentActivity
-            val vm: SettingsViewModel = viewModel(activity)
+            val vm: SettingsViewModel = viewModel()
             SettingsScreen(
                 viewModel = vm,
                 onNavigateBack = {

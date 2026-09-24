@@ -232,7 +232,7 @@ class EmbeddedTermuxManager(private val context: Context) {
             // Setup resolv.conf and sources.list
             setupConfigFiles(onLog)
 
-            onLog("🟢 Full Embedded Termux Linux Userspace is ACTIVE (aarch64)!")
+            onLog("Full Embedded Termux Linux Userspace is ACTIVE (aarch64)!")
             return@withContext true
         } catch (e: Exception) {
             onLog("⚠️ Extraction error: ${e.message}")
@@ -302,11 +302,8 @@ class EmbeddedTermuxManager(private val context: Context) {
      */
     fun buildEnvironment(workingDir: File = homeDir): Map<String, String> {
         val currentPath = System.getenv("PATH") ?: "/system/bin:/system/xbin"
-        val termuxExtBin = "/data/data/com.termux/files/usr/bin"
-        val termuxExtLib = "/data/data/com.termux/files/usr/lib"
-
-        val path = "${binDir.absolutePath}:$termuxExtBin:$currentPath"
-        val ldLibPath = "${libDir.absolutePath}:$termuxExtLib:${System.getenv("LD_LIBRARY_PATH") ?: ""}"
+        val path = "${binDir.absolutePath}:$currentPath"
+        val ldLibPath = "${libDir.absolutePath}:${System.getenv("LD_LIBRARY_PATH") ?: ""}"
         val nodeModules = "${libDir.absolutePath}/node_modules:${File(filesDir, "nodejs/node_modules").absolutePath}"
 
         return mapOf(

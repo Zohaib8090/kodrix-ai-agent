@@ -115,7 +115,7 @@ fun ProjectWorkspaceScreen(
                             }
                         }
                         Text(
-                            text = "📁 ${state.mainFolderPath} • AI: ${state.activeProviderName}",
+                            text = "${state.mainFolderPath} • AI: ${state.activeProviderName}",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -519,8 +519,8 @@ private fun AiChatTab(
 
     val promptSuggestions = listOf(
         "✨ Add a dark mode toggle",
-        "📱 Make responsive for mobile",
-        "🎨 Improve colors & typography",
+        "Make responsive for mobile",
+        "Improve colors & typography",
         "⚡ Add interactive animations"
     )
 
@@ -909,7 +909,7 @@ private fun AiChatTab(
                     onClick = {
                         val isAiActiveNow = isAiRefining || isOnboardingThinking || isGenerating
                         if (!isAiActiveNow) {
-                            val cleanPrompt = suggestion.removePrefix("✨ ").removePrefix("📱 ").removePrefix("🎨 ").removePrefix("⚡ ")
+                            val cleanPrompt = suggestion
                             if (isOnboarding) {
                                 onSendOnboardingReply(cleanPrompt)
                             } else {
@@ -2257,8 +2257,8 @@ private fun TerminalTab(
     }
 
     val quickCommands = listOf(
-        "🚀 Install Full Termux" to "setup-termux",
-        "⚡ Install Node Engine" to "setup-node",
+        "Initialize Embedded Linux" to "setup-termux",
+        "Install Node Engine" to "setup-node",
         "pkg install nodejs" to "pkg install -y nodejs git",
         "ls -la" to "ls -la",
         "npm install" to "npm install",

@@ -268,6 +268,10 @@ abstract class BaseAiProvider(
             ENDFILE
 
             Always generate complete, working code. For Web apps, always include an index.html file so it can be previewed live.
+            
+            EMBEDDED LINUX ENVIRONMENT:
+            If the user requests to build a web app, run a script, or requires a local development environment (Node.js, npm, python, etc.), you MUST ask for permission to initialize the embedded Linux subsystem.
+            To do this, include the exact string `<REQUEST_LINUX_SUBSYSTEM>` anywhere in your response text.
         """.trimIndent()
     }
 
