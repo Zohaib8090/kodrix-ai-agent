@@ -4,13 +4,57 @@ package com.example.data.ai
 import com.example.data.model.ProviderConfig
 import com.example.data.model.VerifyResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import java.io.IOException
+import com.example.data.remote.ApiClient
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
-class GeminiProvider(config: ProviderConfig) : BaseAiProvider(config) {
+class GeminiProvider(
+    config: ProviderConfig,
+    client: OkHttpClient = ApiClient.createAiHttpClient(60)
+) : BaseAiProvider(config, client) {
+    private fun buildGeminiBody(systemPrompt: String, userPrompt: String): JSONObject {
+        val body = JSONObject().apply {
+            val contents = JSONArray().apply {
+                put(JSONObject().apply {
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", "$systemPrompt\n\n$userPrompt")
+                        })
+                    }
+                    put("parts", parts)
+                })
+            }
+            put("contents", contents)
+
+            if (config.thinkingEnabled) {
+                val budget = when (config.thinkingLevel.lowercase()) {
+                    "low" -> 1024
+                    "medium" -> 2048
+                    "high" -> 4096
+                    "ultra" -> 8192
+                    "adaptive" -> -1
+                    else -> config.thinkingLevel.toIntOrNull() ?: config.thinkingBudgetTokens
+                }
+                val genConfig = JSONObject()
+                if (budget > 0) {
+                    genConfig.put("thinkingConfig", JSONObject().apply {
+                        put("thinkingBudget", budget)
+                    })
+                }
+                put("generationConfig", genConfig)
+            }
+        }
+        mergeCustomPayload(body)
+        return body
+    }
+
     override suspend fun callAiModel(systemPrompt: String, userPrompt: String): Result<String> = withContext(Dispatchers.IO) {
         val model = config.defaultModel.ifEmpty { "gemini-2.5-flash" }
         val key = config.apiKey.trim()
@@ -20,38 +64,7 @@ class GeminiProvider(config: ProviderConfig) : BaseAiProvider(config) {
         try {
             val base = config.baseUrl.ifEmpty { "https://generativelanguage.googleapis.com" }
             val url = if (base.endsWith("/")) "${base}v1beta/models/$model:generateContent?key=$key" else "$base/v1beta/models/$model:generateContent?key=$key"
-            val body = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    put(JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("text", "$systemPrompt\n\n$userPrompt")
-                            })
-                        }
-                        put("parts", parts)
-                    })
-                }
-                put("contents", contents)
-
-                if (config.thinkingEnabled) {
-                    val budget = when (config.thinkingLevel.lowercase()) {
-                        "low" -> 1024
-                        "medium" -> 2048
-                        "high" -> 4096
-                        "ultra" -> 8192
-                        "adaptive" -> -1
-                        else -> config.thinkingLevel.toIntOrNull() ?: config.thinkingBudgetTokens
-                    }
-                    val genConfig = JSONObject()
-                    if (budget > 0) {
-                        genConfig.put("thinkingConfig", JSONObject().apply {
-                            put("thinkingBudget", budget)
-                        })
-                    }
-                    put("generationConfig", genConfig)
-                }
-            }
-            mergeCustomPayload(body)
+            val body = buildGeminiBody(systemPrompt, userPrompt)
 
             val request = Request.Builder()
                 .url(url)
@@ -71,6 +84,31 @@ class GeminiProvider(config: ProviderConfig) : BaseAiProvider(config) {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    override fun chatStream(systemPrompt: String, userPrompt: String): Flow<String> {
+        val key = config.apiKey.trim()
+        if (key.isBlank()) return flow { throw IOException("Gemini API key is required") }
+        val model = config.defaultModel.ifEmpty { "gemini-2.5-flash" }
+        val base = config.baseUrl.ifEmpty { "https://generativelanguage.googleapis.com" }.trimEnd('/')
+        val url = "$base/v1beta/models/$model:streamGenerateContent?alt=sse&key=$key"
+        val request = Request.Builder()
+            .url(url)
+            .post(buildGeminiBody(systemPrompt, userPrompt).toString().toRequestBody(jsonMediaType))
+            .build()
+        return sseDataFlow(request) { data ->
+            val parts = JSONObject(data).optJSONArray("candidates")?.optJSONObject(0)
+                ?.optJSONObject("content")?.optJSONArray("parts")
+            val sb = StringBuilder()
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    val part = parts.optJSONObject(i) ?: continue
+                    if (part.optBoolean("thought", false)) continue
+                    sb.append(part.optString("text", ""))
+                }
+            }
+            sb.toString()
         }
     }
 
@@ -140,7 +178,46 @@ class OpenAiProvider(config: ProviderConfig) : BaseAiProvider(config) {
     }
 }
 
-class AnthropicProvider(config: ProviderConfig) : BaseAiProvider(config) {
+class AnthropicProvider(
+    config: ProviderConfig,
+    client: OkHttpClient = ApiClient.createAiHttpClient(60)
+) : BaseAiProvider(config, client) {
+    private fun buildAnthropicBody(systemPrompt: String, userPrompt: String, stream: Boolean): JSONObject {
+        val model = config.defaultModel.ifEmpty { "claude-3-5-sonnet-20241022" }
+        val body = JSONObject().apply {
+            put("model", model)
+            put("system", systemPrompt)
+            val msgs = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", userPrompt)
+                })
+            }
+            put("messages", msgs)
+
+            if (config.thinkingEnabled) {
+                val budget = when (config.thinkingLevel.lowercase()) {
+                    "low" -> 1024
+                    "medium" -> 2048
+                    "high" -> 4096
+                    "ultra" -> 8192
+                    "adaptive" -> 2048
+                    else -> config.thinkingLevel.toIntOrNull() ?: config.thinkingBudgetTokens
+                }.coerceAtLeast(1024)
+                put("max_tokens", budget + 4096)
+                put("thinking", JSONObject().apply {
+                    put("type", "enabled")
+                    put("budget_tokens", budget)
+                })
+            } else {
+                put("max_tokens", 4096)
+            }
+        }
+        mergeCustomPayload(body)
+        if (stream) body.put("stream", true)
+        return body
+    }
+
     override suspend fun callAiModel(systemPrompt: String, userPrompt: String): Result<String> = withContext(Dispatchers.IO) {
         val model = config.defaultModel.ifEmpty { "claude-3-5-sonnet-20241022" }
         val key = config.apiKey.trim()
@@ -150,36 +227,7 @@ class AnthropicProvider(config: ProviderConfig) : BaseAiProvider(config) {
         try {
             val base = config.baseUrl.ifEmpty { "https://api.anthropic.com/v1" }
             val url = if (base.endsWith("/")) "${base}messages" else "$base/messages"
-            val body = JSONObject().apply {
-                put("model", model)
-                put("system", systemPrompt)
-                val msgs = JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", userPrompt)
-                    })
-                }
-                put("messages", msgs)
-
-                if (config.thinkingEnabled) {
-                    val budget = when (config.thinkingLevel.lowercase()) {
-                        "low" -> 1024
-                        "medium" -> 2048
-                        "high" -> 4096
-                        "ultra" -> 8192
-                        "adaptive" -> 2048
-                        else -> config.thinkingLevel.toIntOrNull() ?: config.thinkingBudgetTokens
-                    }.coerceAtLeast(1024)
-                    put("max_tokens", budget + 4096)
-                    put("thinking", JSONObject().apply {
-                        put("type", "enabled")
-                        put("budget_tokens", budget)
-                    })
-                } else {
-                    put("max_tokens", 4096)
-                }
-            }
-            mergeCustomPayload(body)
+            val body = buildAnthropicBody(systemPrompt, userPrompt, stream = false)
 
             val request = Request.Builder()
                 .url(url)
@@ -214,6 +262,32 @@ class AnthropicProvider(config: ProviderConfig) : BaseAiProvider(config) {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    override fun chatStream(systemPrompt: String, userPrompt: String): Flow<String> {
+        val key = config.apiKey.trim()
+        if (key.isBlank()) return flow { throw IOException("Anthropic API key is required") }
+        val base = config.baseUrl.ifEmpty { "https://api.anthropic.com/v1" }
+        val url = if (base.endsWith("/")) "${base}messages" else "$base/messages"
+        val request = Request.Builder()
+            .url(url)
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .post(buildAnthropicBody(systemPrompt, userPrompt, stream = true).toString().toRequestBody(jsonMediaType))
+            .build()
+        return sseDataFlow(request) { data ->
+            val event = JSONObject(data)
+            when (event.optString("type")) {
+                "content_block_delta" -> {
+                    val delta = event.optJSONObject("delta")
+                    if (delta?.optString("type") == "text_delta") delta.optString("text", "") else ""
+                }
+                "message_stop" -> null
+                "error" -> throw IOException("Claude error: ${event.optJSONObject("error")?.optString("message") ?: data}")
+                else -> ""
+            }
         }
     }
 

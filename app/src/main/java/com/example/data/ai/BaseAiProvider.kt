@@ -11,6 +11,12 @@ import com.example.data.model.VerifyResult
 import com.example.data.model.WebFramework
 import com.example.data.remote.ApiClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -18,6 +24,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 abstract class BaseAiProvider(
@@ -139,12 +146,13 @@ abstract class BaseAiProvider(
         }
     }
 
-    protected open suspend fun callAiModel(systemPrompt: String, userPrompt: String): Result<String> {
-        // Default OpenAI-compatible chat completion
+    private fun openAiChatUrl(): String {
         val baseUrl = config.baseUrl.ifEmpty { "https://api.openai.com/v1" }
-        val model = config.defaultModel.ifEmpty { "gpt-4o" }
-        val url = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
+        return if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
+    }
 
+    private fun buildOpenAiChatBody(systemPrompt: String, userPrompt: String, stream: Boolean): JSONObject {
+        val model = config.defaultModel.ifEmpty { "gpt-4o" }
         val body = JSONObject().apply {
             put("model", model)
             val messages = JSONArray().apply {
@@ -159,6 +167,7 @@ abstract class BaseAiProvider(
             }
             put("messages", messages)
             put("temperature", 0.3)
+            if (stream) put("stream", true)
 
             // Thinking / Reasoning parameters for OpenAI, DeepSeek, Groq, OpenRouter, etc.
             if (config.thinkingEnabled) {
@@ -178,8 +187,13 @@ abstract class BaseAiProvider(
             }
         }
         mergeCustomPayload(body)
+        return body
+    }
 
-        val request = buildAuthorizedRequest(url, "POST", body.toString())
+    protected open suspend fun callAiModel(systemPrompt: String, userPrompt: String): Result<String> {
+        // Default OpenAI-compatible chat completion
+        val body = buildOpenAiChatBody(systemPrompt, userPrompt, stream = false)
+        val request = buildAuthorizedRequest(openAiChatUrl(), "POST", body.toString())
         val response = client.newCall(request).execute()
         val respBody = response.body?.string() ?: ""
 
@@ -196,6 +210,53 @@ abstract class BaseAiProvider(
             return Result.failure(Exception("AI API error: HTTP ${response.code} $respBody"))
         }
     }
+
+    /**
+     * Streams the model reply as text deltas. The default implementation speaks the OpenAI-compatible
+     * server-sent-events protocol; providers with a different wire format override it.
+     */
+    override fun chatStream(systemPrompt: String, userPrompt: String): Flow<String> {
+        if (config.apiKey.isBlank() && config.authStyle != AuthStyle.NONE) {
+            return flow { throw IOException("API key is not configured for ${config.name}. Please configure your API key in Settings.") }
+        }
+        val body = buildOpenAiChatBody(systemPrompt, userPrompt, stream = true)
+        val request = buildAuthorizedRequest(openAiChatUrl(), "POST", body.toString())
+        return sseDataFlow(request) { data ->
+            if (data == "[DONE]") return@sseDataFlow null
+            val delta = JSONObject(data).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")
+            if (delta == null || delta.isNull("content")) "" else delta.optString("content", "")
+        }
+    }
+
+    /**
+     * Opens a server-sent-events request and emits whatever [extract] returns for each `data:` payload.
+     * Returning null from [extract] ends the stream; empty strings are skipped.
+     */
+    protected fun sseDataFlow(request: Request, extract: (String) -> String?): Flow<String> = flow {
+        val call = client.newCall(request)
+        val job = currentCoroutineContext()[Job]
+        val handle = job?.invokeOnCompletion { call.cancel() }
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errBody = response.body?.string().orEmpty()
+                    throw IOException("AI API error: HTTP ${response.code} $errBody")
+                }
+                val source = response.body?.source() ?: throw IOException("Empty response from ${config.name}")
+                while (!source.exhausted()) {
+                    currentCoroutineContext().ensureActive()
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload.isEmpty()) continue
+                    val piece = extract(payload) ?: break
+                    if (piece.isNotEmpty()) emit(piece)
+                }
+            }
+        } finally {
+            handle?.dispose()
+        }
+    }.flowOn(Dispatchers.IO)
 
     override suspend fun chat(systemPrompt: String, userPrompt: String): Result<String> = withContext(Dispatchers.IO) {
         try {

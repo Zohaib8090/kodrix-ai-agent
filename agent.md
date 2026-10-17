@@ -12,7 +12,7 @@ You are the AI Agent operating within the **Kodrix Android App** codebase. Your 
 ### The AI Subsystem Initialization Flow
 - **Goal**: When a user asks the AI inside the Kodrix app to build a website/app, the AI must proactively ask the user to start the Linux subsystem.
 - **Mechanism**: The AI is instructed via its System Prompt (in `BaseAiProvider.kt`) to output the exact string `<REQUEST_LINUX_SUBSYSTEM>`.
-- **UI Handling**: `ProjectWorkspaceViewModel.kt` parses the chat messages. When it detects the `<REQUEST_LINUX_SUBSYSTEM>` tag, it strips the tag from the UI and sets `showLinuxSubsystemPrompt = true`. This triggers a prompt in `ProjectWorkspaceScreen.kt` asking the user to initialize the Embedded Linux environment.
+- **UI Handling**: `ProjectWorkspaceViewModel.kt` detects the `<REQUEST_LINUX_SUBSYSTEM>` tag in the AI reply (`AiResponse.stripLinuxRequest`), strips it from the chat and sets `showLinuxSubsystemPrompt = true`. `ProjectWorkspaceScreen.kt` then shows `LinuxSetupPrompt`; accepting it opens `LinuxSetupSheet`, which shows download and install progress and categorized errors with retry.
 
 ## Key Files to Remember
 - `BaseAiProvider.kt` / `ConcreteProviders.kt`: LLM API calls and system prompt definitions.

@@ -342,6 +342,10 @@ class RealTerminalSession(
 
     private var process: Process? = null
 
+    private companion object {
+        const val MAX_OUTPUT_LINES = 1000
+    }
+
     init {
         nodeService?.setupRealEnv()
     }
@@ -360,15 +364,30 @@ class RealTerminalSession(
                 // 1. Check for setup-termux or setup-node installer commands
                 if (cmd == "setup-termux" || cmd == "install-termux") {
                     appendOutput(">> Initializing Embedded Termux Linux Rootfs (${embeddedTermux.getArchitecture()})...")
+                    var lastPhase: LinuxSetupPhase? = null
+                    var lastDecile = -1
+                    var failure: LinuxSetupState? = null
                     val success = embeddedTermux.installBootstrap(
                         onLog = { appendOutput(it) },
-                        onProgress = { p -> if (p > 0) appendOutput(">> Progress: ${(p * 100).toInt()}%") }
+                        onState = { st ->
+                            if (st.phase == LinuxSetupPhase.FAILED) failure = st
+                            val decile = ((st.overallProgress * 100).toInt()) / 10
+                            if (st.phase != lastPhase || decile != lastDecile) {
+                                lastPhase = st.phase
+                                lastDecile = decile
+                                if (st.phase != LinuxSetupPhase.FAILED) {
+                                    appendOutput(">> ${st.phase.label}: ${(st.overallProgress * 100).toInt()}%")
+                                }
+                            }
+                        }
                     )
                     if (success) {
-                        appendOutput("✓ Full Embedded Termux Linux environment is ACTIVE!")
+                        appendOutput("Full Embedded Termux Linux environment is ACTIVE.")
                         appendOutput("You can now run 'pkg install <pkg>', 'bash', 'node', 'npm', 'git', etc.")
                     } else {
-                        appendOutput("⚠️ Setup failed. Check internet connection and try again.")
+                        val err = failure?.error
+                        appendOutput("Setup failed: ${err?.title ?: "unknown error"}")
+                        err?.let { appendOutput(it.hint) }
                     }
                     _isRunning.value = false
                     onComplete?.invoke(if (success) 0 else 1)
@@ -392,7 +411,11 @@ class RealTerminalSession(
                 // 2. If Embedded Termux or Real Node.js binary is installed, execute real OS process
                 val realNode = nodeService?.getRealNodeBinary()
                 if (embeddedTermux.isInstalled || realNode != null || cmd == "pkg" || cmd == "apt" || cmd == "apt-get" || cmd == "bash" || cmd == "sh" || cmd == "dpkg") {
-                    val exit = embeddedTermux.execute(trimmed, currentDir) { line ->
+                    val exit = embeddedTermux.execute(
+                        trimmed,
+                        currentDir,
+                        onPartial = { setLiveLine(it) }
+                    ) { line ->
                         appendOutput(line)
                     }
                     if (exit != 0) {
@@ -1075,12 +1098,51 @@ class RealTerminalSession(
         }
     }
 
+    @Synchronized
     fun clear() {
+        hasLiveLine = false
         _outputLines.value = listOf("Terminal cleared.", "Working Dir: ${currentDir.name}")
     }
 
+    // True while the last output line is an unfinished line (progress bar, prompt) that the next update replaces.
+    private var hasLiveLine = false
+
+    @Synchronized
     fun appendOutput(text: String) {
-        _outputLines.value = (_outputLines.value + text).takeLast(600)
+        val current = _outputLines.value
+        val base = if (hasLiveLine) current.dropLast(1) else current
+        hasLiveLine = false
+        _outputLines.value = (base + text).takeLast(MAX_OUTPUT_LINES)
+    }
+
+    @Synchronized
+    private fun setLiveLine(text: String) {
+        val current = _outputLines.value
+        val base = if (hasLiveLine) current.dropLast(1) else current
+        hasLiveLine = true
+        _outputLines.value = (base + text).takeLast(MAX_OUTPUT_LINES)
+    }
+
+    /** Sends a line of input to the command that is currently running. */
+    fun sendInput(text: String) {
+        val fallback = process?.takeIf { it.isAlive }
+        val delivered = embeddedTermux.sendInput(text) || try {
+            fallback?.outputStream?.let { it.write((text + "\n").toByteArray()); it.flush(); true } ?: false
+        } catch (_: java.io.IOException) {
+            false
+        }
+        appendOutput(if (delivered) text else "No running command is waiting for input.")
+    }
+
+    /** Stops the running command (Ctrl+C). */
+    fun interrupt() {
+        val fallback = process?.takeIf { it.isAlive }
+        when {
+            embeddedTermux.hasRunningProcess -> embeddedTermux.interrupt()
+            fallback != null -> fallback.destroy()
+            else -> return
+        }
+        appendOutput("^C")
     }
 
     fun destroy() {

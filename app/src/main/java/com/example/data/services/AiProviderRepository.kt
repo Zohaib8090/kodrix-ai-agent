@@ -8,6 +8,9 @@ import com.example.data.model.CodeArtifact
 import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
 import com.example.data.model.VerifyResult
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import java.io.IOException
 
 class AiProviderRepository(
     private val preferenceStorage: PreferenceStorage
@@ -86,23 +89,39 @@ class AiProviderRepository(
         return provider.fixError(log, sourceFiles, effectiveScreenshot)
     }
 
+    private fun resolveUsableConfig(providerId: String): ProviderConfig? {
+        // Prefer the explicitly selected provider if it has a real API key
+        val selected = getProviderConfig(providerId)
+        return when {
+            selected != null && selected.apiKey.isNotBlank() && selected.apiKey != "dummy_api_key" -> selected
+            else -> preferenceStorage.getProviders()
+                .firstOrNull { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" }
+                ?: preferenceStorage.getProviders().firstOrNull()
+        }
+    }
+
+    private val noProviderMessage = "No AI provider configured. Please add an API key in Settings → AI & Models."
+
     suspend fun chat(
         providerId: String,
         systemPrompt: String,
         userPrompt: String
     ): Result<String> {
-        // Prefer the explicitly selected provider if it has a real API key
-        val selected = getProviderConfig(providerId)
-        val usableConfig = when {
-            selected != null && selected.apiKey.isNotBlank() && selected.apiKey != "dummy_api_key" -> selected
-            else -> preferenceStorage.getProviders()
-                .firstOrNull { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" }
-                ?: preferenceStorage.getProviders().firstOrNull()
-                ?: return Result.failure(Exception("No AI provider configured. Please add an API key in Settings → AI & Models."))
-        }
-
+        val usableConfig = resolveUsableConfig(providerId)
+            ?: return Result.failure(Exception(noProviderMessage))
         val provider = AiProviderFactory.create(usableConfig)
         return provider.chat(systemPrompt, userPrompt)
+    }
+
+    /** Streams the reply as text deltas; failures are thrown to the collector. */
+    fun chatStream(
+        providerId: String,
+        systemPrompt: String,
+        userPrompt: String
+    ): Flow<String> {
+        val usableConfig = resolveUsableConfig(providerId)
+            ?: return flow { throw IOException(noProviderMessage) }
+        return AiProviderFactory.create(usableConfig).chatStream(systemPrompt, userPrompt)
     }
 
     fun getUsableProviders(): List<ProviderConfig> {

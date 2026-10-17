@@ -9,10 +9,12 @@ Kodrix is an Android application built with **Kotlin** and **Jetpack Compose**. 
    - Communicates via OpenAI-compatible REST APIs and specialized endpoints (like Gemini's `generativelanguage.googleapis.com/v1beta/models`).
    - Supports **Vision** (via `screenshot` payloads) and dynamic model fetching.
    - Requires strict system prompts to output code in a standardized format (`FILE: ... \n ```[lang] ... ``` \n ENDFILE`).
+   - **Streaming:** `AiProvider.chatStream` emits text deltas over server-sent events (OpenAI-compatible in `BaseAiProvider`, with Gemini and Anthropic overrides). The workspace chat uses it, showing the reply live with file blocks collapsed to a status line (`AiResponse.streamingPreview`).
+   - **Review before apply:** file edits proposed by the AI are not written immediately. `ProjectWorkspaceViewModel` builds `PendingChanges` (line diffs from `util/LineDiff.kt`) and `ChangeReviewSheet` lets the user pick files to apply. Paths are sanitised with `AiResponse.safeRelativePath`; AI-requested terminal commands run only after the changes are applied.
 
 2. **Embedded Linux Subsystem (`EmbeddedTermuxManager.kt`)**
    - Provides a full, self-contained Linux rootfs directly inside the Android app sandbox (`context.filesDir/usr`).
-   - Capable of downloading and installing Termux bootstrap zip files dynamically.
+   - Capable of downloading and installing Termux bootstrap zip files dynamically. Installation extracts to a staging directory and renames it into place on success, reports phase/progress/errors through `LinuxSetupState` (`LinuxSetup.kt`), and is driven from the UI by `LinuxSetupSheet`.
    - **Crucial Rule:** The app is strictly sandboxed. It does *not* rely on the external Google Play Termux application (`/data/data/com.termux/`) for any binaries. It executes everything internally using its own `binDir` and `libDir`.
 
 3. **Development Environment (`NodeService.kt`)**
@@ -27,7 +29,7 @@ Kodrix is an Android application built with **Kotlin** and **Jetpack Compose**. 
 
 ## Important Configurations
 - **Icons**: Uses Material 3 standard icons (`Icons.Default.*`). Emojis are strictly forbidden in UI text and logs by user preference.
-- **Terminal Emulator**: Currently exploring an upgrade to a robust terminal emulator (e.g., Termux `terminal-view`) to replace the basic text-log implementation.
+- **Terminal**: Output is rendered by a native Compose ANSI renderer (`ui/terminal/AnsiParser.kt`, `TerminalOutput.kt`): SGR colors and styles, carriage-return progress bars, live unfinished lines, stdin for running commands and an interrupt button. It runs commands over pipes, not a PTY, so full-screen programs (vim, top) are not supported.
 - **Gradle**: Uses Kotlin DSL (`build.gradle.kts`) and Jetpack Compose. Includes dependencies like Coil (`coil.compose`) for image loading (clipboard/vision support).
 
 ## Project Guidelines

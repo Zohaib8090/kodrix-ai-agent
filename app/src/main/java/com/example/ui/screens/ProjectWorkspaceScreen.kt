@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,8 +49,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.ProjectChatSession
 import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
+import com.example.data.services.LinuxSetupState
 import com.example.data.services.ProjectFileNode
 import com.example.ui.common.InAppWebPreview
+import com.example.ui.terminal.AnsiTerminalOutput
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.LandingPeach
 import com.example.ui.theme.LandingPeachHover
@@ -73,6 +78,10 @@ fun ProjectWorkspaceScreen(
 
     LaunchedEffect(projectId) {
         viewModel.loadProject(projectId)
+    }
+
+    LaunchedEffect(state.activeTab) {
+        viewModel.refreshLinuxInstalled()
     }
 
     LaunchedEffect(state.notification) {
@@ -387,6 +396,9 @@ fun ProjectWorkspaceScreen(
                             isGenerating = state.isGenerating,
                             isOnboarding = state.isOnboarding,
                             isOnboardingThinking = state.isOnboardingThinking,
+                            streamingText = state.streamingText,
+                            pendingChangeCount = state.pendingChanges?.files?.size ?: 0,
+                            onReviewChanges = { viewModel.setShowChangeReview(true) },
                             activeProvider = state.activeProviderName,
                             onSendMessage = { instruction ->
                                 viewModel.refineWithAi(instruction)
@@ -446,6 +458,10 @@ fun ProjectWorkspaceScreen(
                             projectName = state.projectName,
                             terminalLogs = state.terminalLogs,
                             isRunning = state.isTerminalRunning,
+                            isLinuxInstalled = state.isLinuxInstalled,
+                            linuxSetup = state.linuxSetup,
+                            onSetupLinux = { viewModel.requestLinuxSetup() },
+                            onInterrupt = { viewModel.interruptTerminal() },
                             onExecuteCommand = { command ->
                                 viewModel.executeTerminalCommand(command)
                             },
@@ -469,6 +485,35 @@ fun ProjectWorkspaceScreen(
             }
         }
     }
+
+    if (state.showLinuxSubsystemPrompt) {
+        LinuxSetupPrompt(
+            onInstall = { viewModel.startLinuxSetup() },
+            onDismiss = { viewModel.dismissLinuxPrompt() }
+        )
+    }
+
+    if (state.showLinuxSetupSheet) {
+        LinuxSetupSheet(
+            state = state.linuxSetup,
+            log = state.linuxSetupLog,
+            onStart = { viewModel.startLinuxSetup() },
+            onCancel = { viewModel.cancelLinuxSetup() },
+            onDismiss = { viewModel.dismissLinuxSetupSheet() }
+        )
+    }
+
+    val pendingChanges = state.pendingChanges
+    if (pendingChanges != null && state.showChangeReview) {
+        ChangeReviewSheet(
+            pending = pendingChanges,
+            onToggleFile = { viewModel.togglePendingFile(it) },
+            onSelectAll = { viewModel.setAllPendingSelected(it) },
+            onApply = { viewModel.applyPendingChanges() },
+            onDiscard = { viewModel.discardPendingChanges() },
+            onHide = { viewModel.setShowChangeReview(false) }
+        )
+    }
 }
 
 /**
@@ -484,6 +529,9 @@ private fun AiChatTab(
     isGenerating: Boolean = false,
     isOnboarding: Boolean = false,
     isOnboardingThinking: Boolean = false,
+    streamingText: String = "",
+    pendingChangeCount: Int = 0,
+    onReviewChanges: () -> Unit = {},
     activeProvider: String,
     onSendMessage: (String) -> Unit,
     onRetryPrompt: (String) -> Unit,
@@ -523,6 +571,19 @@ private fun AiChatTab(
         "Improve colors & typography",
         "⚡ Add interactive animations"
     )
+
+    val chatListState = rememberLazyListState()
+    val aiActiveForScroll = isAiRefining || isOnboardingThinking || isGenerating
+    val chatItemCount = messages.size + (if (streamingText.isNotBlank()) 1 else 0) + (if (aiActiveForScroll) 1 else 0)
+    LaunchedEffect(chatItemCount, streamingText.length) {
+        if (chatItemCount > 0) {
+            val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            // Follow new output, but leave the list alone if the user scrolled up to read older messages.
+            if (lastVisible >= chatItemCount - 3 || streamingText.isEmpty()) {
+                chatListState.scrollToItem(chatItemCount - 1)
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Multi-Chat Sessions Header Bar
@@ -613,6 +674,7 @@ private fun AiChatTab(
             }
         }
         LazyColumn(
+            state = chatListState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -833,6 +895,28 @@ private fun AiChatTab(
             }
 
             val isAiActive = isAiRefining || isOnboardingThinking || isGenerating
+            if (streamingText.isNotBlank()) {
+                item(key = "streaming_reply") {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .widthIn(max = 340.dp)
+                                .testTag("streaming_reply")
+                        ) {
+                            Text(
+                                text = streamingText,
+                                fontFamily = InterFontFamily,
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+                }
+            }
             if (isAiActive) {
                 item {
                     Row(
@@ -894,6 +978,10 @@ private fun AiChatTab(
                     }
                 }
             }
+        }
+
+        if (pendingChangeCount > 0) {
+            PendingChangesBanner(fileCount = pendingChangeCount, onReview = onReviewChanges)
         }
 
         // Suggestions row
@@ -2236,28 +2324,49 @@ private fun NewFolderDialog(
 }
 
 /**
- * Tab 3: Interactive Linux / Termux Terminal Environment with curl/wget/node/npm support.
+ * Tab 3: Terminal for the embedded Linux environment. Output is rendered with ANSI colors and styles,
+ * unfinished lines (progress bars, prompts) update live, and while a command runs the input box sends
+ * its text to that command's stdin.
  */
 @Composable
 private fun TerminalTab(
     projectName: String,
     terminalLogs: List<String>,
     isRunning: Boolean,
+    isLinuxInstalled: Boolean,
+    linuxSetup: LinuxSetupState,
+    onSetupLinux: () -> Unit,
+    onInterrupt: () -> Unit,
     onExecuteCommand: (String) -> Unit,
     onClearTerminal: () -> Unit
 ) {
+    val context = LocalContext.current
     var commandInput by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
+    val history = remember { mutableStateListOf<String>() }
+    var historyIndex by remember { mutableIntStateOf(-1) }
 
-    // Auto-scroll to the latest log line
-    LaunchedEffect(terminalLogs.size) {
-        if (terminalLogs.isNotEmpty()) {
-            listState.animateScrollToItem(terminalLogs.size - 1)
+    fun submit() {
+        val toRun = commandInput.trim()
+        if (toRun.isEmpty()) return
+        if (!isRunning && history.lastOrNull() != toRun) history.add(toRun)
+        historyIndex = -1
+        commandInput = ""
+        onExecuteCommand(toRun)
+    }
+
+    fun browseHistory(direction: Int) {
+        if (history.isEmpty()) return
+        val next = if (historyIndex == -1) {
+            if (direction < 0) history.lastIndex else -1
+        } else {
+            (historyIndex + direction).coerceIn(-1, history.lastIndex)
         }
+        historyIndex = next
+        commandInput = if (next == -1) "" else history[next]
     }
 
     val quickCommands = listOf(
-        "Initialize Embedded Linux" to "setup-termux",
+        "Set up Linux" to "setup-termux",
         "Install Node Engine" to "setup-node",
         "pkg install nodejs" to "pkg install -y nodejs git",
         "ls -la" to "ls -la",
@@ -2282,7 +2391,7 @@ private fun TerminalTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Icon(
                     imageVector = Icons.Default.Terminal,
                     contentDescription = null,
@@ -2300,13 +2409,16 @@ private fun TerminalTab(
                 Spacer(modifier = Modifier.width(8.dp))
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF1E293B)
+                    color = Color(0xFF1E293B),
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
                     Text(
                         text = "my_projects/$projectName",
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
                         color = Color(0xFF94A3B8),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -2320,13 +2432,39 @@ private fun TerminalTab(
                         color = Color(0xFF38BDF8)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Running...",
-                        fontFamily = InterFontFamily,
-                        fontSize = 11.sp,
-                        color = Color(0xFF38BDF8)
+                    IconButton(
+                        onClick = onInterrupt,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .testTag("terminal_stop_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Stop running command",
+                            tint = Color(0xFFF87171),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        // Strip escape sequences so the clipboard holds plain text.
+                        val plain = terminalLogs.joinToString("\n") { line ->
+                            com.example.ui.terminal.AnsiParser().parseLine(line).joinToString("") { it.text }
+                        }
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Terminal output", plain))
+                        Toast.makeText(context, "Terminal output copied", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy terminal output",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
                 }
 
                 IconButton(
@@ -2343,7 +2481,49 @@ private fun TerminalTab(
             }
         }
 
-        // 2. Quick Command Chips Row
+        // 2. Linux status
+        val setupRunning = linuxSetup.isRunning
+        val statusText = when {
+            setupRunning -> "Installing Linux: ${(linuxSetup.overallProgress * 100).toInt()}%. Tap for details"
+            isLinuxInstalled -> "Linux environment ready"
+            else -> "Linux environment not installed. Tap to set up"
+        }
+        val statusColor = when {
+            setupRunning -> Color(0xFF38BDF8)
+            isLinuxInstalled -> Color(0xFF4ADE80)
+            else -> Color(0xFFFACC15)
+        }
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFF111827),
+            border = BorderStroke(1.dp, statusColor.copy(alpha = 0.5f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .clickable(enabled = !isLinuxInstalled || setupRunning, onClick = onSetupLinux)
+                .testTag("terminal_linux_status")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = statusText,
+                    fontFamily = InterFontFamily,
+                    fontSize = 12.sp,
+                    color = Color(0xFFE2E8F0)
+                )
+            }
+        }
+
+        // 3. Quick Command Chips Row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2352,7 +2532,7 @@ private fun TerminalTab(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             quickCommands.forEach { (label, cmd) ->
-                val isSetup = cmd == "setup-node"
+                val isSetup = cmd == "setup-node" || cmd == "setup-termux"
                 val bgColor = if (isSetup) Color(0xFF1E3A5F) else Color(0xFF1E293B)
                 val textColor = if (isSetup) Color(0xFF38BDF8) else Color(0xFF94A3B8)
                 val borderColor = if (isSetup) Color(0xFF0284C7) else Color(0xFF334155)
@@ -2362,16 +2542,16 @@ private fun TerminalTab(
                     color = bgColor,
                     border = BorderStroke(1.dp, borderColor),
                     modifier = Modifier.clickable {
-                        if (cmd == "curl -O ") {
-                            commandInput = "curl -O "
-                        } else {
-                            onExecuteCommand(cmd)
+                        when (cmd) {
+                            "curl -O " -> commandInput = "curl -O "
+                            "setup-termux" -> onSetupLinux()
+                            else -> onExecuteCommand(cmd)
                         }
                     }
                 ) {
                     Text(
                         text = label,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
                         fontWeight = if (isSetup) FontWeight.Bold else FontWeight.Normal,
                         color = textColor,
@@ -2381,7 +2561,7 @@ private fun TerminalTab(
             }
         }
 
-        // 3. Main Console Output Box
+        // 4. Main Console Output Box
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2390,86 +2570,86 @@ private fun TerminalTab(
             shape = RoundedCornerShape(12.dp),
             border = BorderStroke(1.dp, Color(0xFF1F2937))
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(10.dp)
-            ) {
-                items(terminalLogs) { line ->
-                    val textColor = when {
-                        line.startsWith("$ ") -> Color(0xFF4ADE80) // Green command
-                        line.startsWith(">> ") -> Color(0xFF38BDF8) // Cyan progress
-                        line.startsWith("✓ ") -> Color(0xFFFACC15) // Yellow success
-                        line.contains("error", ignoreCase = true) || line.contains("failed", ignoreCase = true) || line.contains("fatal", ignoreCase = true) -> Color(0xFFF87171) // Red error
-                        line.startsWith("[Exit") -> Color(0xFFA78BFA) // Purple exit code
-                        else -> Color(0xFFCBD5E1) // Light gray normal text
-                    }
-
-                    Text(
-                        text = line,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        color = textColor
-                    )
-                }
-            }
+            AnsiTerminalOutput(
+                lines = terminalLogs,
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 4. Command Input Bar
+        // 5. Command Input Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Column {
+                IconButton(
+                    onClick = { browseHistory(-1) },
+                    enabled = history.isNotEmpty(),
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Previous command",
+                        tint = if (history.isNotEmpty()) Color(0xFF94A3B8) else Color(0xFF334155)
+                    )
+                }
+                IconButton(
+                    onClick = { browseHistory(1) },
+                    enabled = historyIndex != -1,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Next command",
+                        tint = if (historyIndex != -1) Color(0xFF94A3B8) else Color(0xFF334155)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(4.dp))
             OutlinedTextField(
                 value = commandInput,
                 onValueChange = { commandInput = it },
                 textStyle = TextStyle(
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
                     color = Color.White
                 ),
                 leadingIcon = {
                     Text(
-                        text = "$",
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        text = if (isRunning) ">" else "$",
+                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = Color(0xFF4ADE80)
+                        color = if (isRunning) Color(0xFF38BDF8) else Color(0xFF4ADE80)
                     )
                 },
                 placeholder = {
                     Text(
-                        text = "curl -O https://... or npm install",
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        text = if (isRunning) "Send input to the running command" else "curl -O https://... or npm install",
+                        fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         color = Color(0xFF64748B)
                     )
                 },
                 trailingIcon = {
                     IconButton(
-                        onClick = {
-                            if (commandInput.isNotBlank()) {
-                                val toRun = commandInput.trim()
-                                commandInput = ""
-                                onExecuteCommand(toRun)
-                            }
-                        },
+                        onClick = { submit() },
                         enabled = commandInput.isNotBlank(),
                         modifier = Modifier.testTag("terminal_send_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Run Command",
+                            contentDescription = if (isRunning) "Send input" else "Run Command",
                             tint = if (commandInput.isNotBlank()) Color(0xFF4ADE80) else Color(0xFF475569),
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = Color(0xFF111827),
@@ -2480,7 +2660,7 @@ private fun TerminalTab(
                     unfocusedTextColor = Color.White
                 ),
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .weight(1f)
                     .testTag("terminal_command_input")
             )
         }

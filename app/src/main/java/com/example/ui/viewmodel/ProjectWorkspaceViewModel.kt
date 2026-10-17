@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,15 +20,24 @@ import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
 import com.example.data.model.WebFramework
 import com.example.data.services.AiProviderRepository
+import com.example.data.services.EmbeddedTermuxManager
+import com.example.data.services.LinuxSetupPhase
+import com.example.data.services.LinuxSetupState
 import com.example.data.services.NodeService
 import com.example.data.services.ProjectFileNode
 import com.example.data.services.ProjectRepository
+import com.example.util.AiResponse
+import com.example.util.LineDiff
 import com.example.util.NotificationHelper
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -77,10 +87,41 @@ data class ProjectWorkspaceUiState(
     val isOnboarding: Boolean = false,
     val isOnboardingThinking: Boolean = false,
     val showLinuxSubsystemPrompt: Boolean = false,
+    val linuxSetup: LinuxSetupState = LinuxSetupState(),
+    val linuxSetupLog: List<String> = emptyList(),
+    val showLinuxSetupSheet: Boolean = false,
+    val isLinuxInstalled: Boolean = false,
+    // Live (not yet persisted) AI reply while it streams in
+    val streamingText: String = "",
+    // AI proposed file edits waiting for the user to accept or reject
+    val pendingChanges: PendingChanges? = null,
+    val showChangeReview: Boolean = false,
     val onboardingConversation: List<WorkspaceChatMessage> = emptyList() // full Q&A history for context
 )
 
+/** One file edit proposed by the AI, with the diff stats against what is on disk. */
+data class PendingFileChange(
+    val path: String,
+    val oldContent: String?,
+    val newContent: String,
+    val added: Int,
+    val removed: Int,
+    val selected: Boolean = true
+) {
+    val isNew: Boolean get() = oldContent == null
+}
+
+data class PendingChanges(
+    val files: List<PendingFileChange>,
+    val commands: List<String>,
+    val summary: String
+)
+
 class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(application) {
+
+    private companion object {
+        const val STREAM_PUBLISH_INTERVAL_MS = 80L
+    }
 
     private val context: Context get() = getApplication<Application>().applicationContext
     private val db = AppDatabase.getInstance(application)
@@ -92,6 +133,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
     private var chatSessionsJob: Job? = null
     private var chatMessagesJob: Job? = null
     private var terminalSession: com.example.data.services.RealTerminalSession? = null
+    private var linuxSetupJob: Job? = null
 
     private val _state = MutableStateFlow(ProjectWorkspaceUiState())
     val state: StateFlow<ProjectWorkspaceUiState> = _state.asStateFlow()
@@ -110,6 +152,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             isGenerating = false,
             isAiRefining = false,
             isOnboardingThinking = false,
+            streamingText = "",
             statusText = "Response stopped",
             notification = "Stopped AI response"
         )
@@ -118,7 +161,28 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
     fun executeTerminalCommand(command: String) {
         val trimmed = command.trim()
         if (trimmed.isBlank()) return
-        terminalSession?.executeCommand(trimmed) { exitCode ->
+        if (_state.value.isTerminalRunning && !isLinuxSetupCommand(trimmed)) {
+            // A command is already running: treat the line as input for it (answers to prompts).
+            terminalSession?.sendInput(trimmed)
+            return
+        }
+        launchTerminalCommand(trimmed, null)
+    }
+
+    private fun isLinuxSetupCommand(command: String) = command == "setup-termux" || command == "install-termux"
+
+    private fun launchTerminalCommand(trimmed: String, onDone: (() -> Unit)?) {
+        if (isLinuxSetupCommand(trimmed)) {
+            startLinuxSetup()
+            onDone?.invoke()
+            return
+        }
+        val session = terminalSession
+        if (session == null) {
+            onDone?.invoke()
+            return
+        }
+        session.executeCommand(trimmed) { _ ->
             // If command may have modified project files (e.g. npm, curl, git, rm, mkdir), refresh file tree
             val lower = trimmed.lowercase()
             if (lower.startsWith("curl") || lower.startsWith("wget") || lower.startsWith("npm") || lower.startsWith("unzip") || lower.startsWith("git") || lower.startsWith("touch") || lower.startsWith("mkdir") || lower.startsWith("rm")) {
@@ -128,18 +192,189 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                         val projectDir = projectRepo.getProjectDir(currentRecord.appName)
                         val updatedFiles = projectRepo.readProjectFiles(projectDir)
                         val tree = projectRepo.getProjectDirectoryTree(projectDir)
-                        _state.value = _state.value.copy(
-                            files = updatedFiles,
-                            directoryTree = tree
-                        )
+                        _state.update { it.copy(files = updatedFiles, directoryTree = tree) }
                     }
                 }
+            }
+            onDone?.invoke()
+        }
+    }
+
+    /** Runs AI requested commands one after another, each waiting for the previous one to finish. */
+    private fun runCommandsInOrder(commands: List<String>) {
+        if (commands.isEmpty()) return
+        viewModelScope.launch {
+            for (cmd in commands) {
+                val trimmed = cmd.trim()
+                if (trimmed.isBlank()) continue
+                _state.first { !it.isTerminalRunning }
+                val finished = CompletableDeferred<Unit>()
+                launchTerminalCommand(trimmed) { finished.complete(Unit) }
+                finished.await()
             }
         }
     }
 
     fun clearTerminal() {
         terminalSession?.clear()
+    }
+
+    fun interruptTerminal() {
+        terminalSession?.interrupt()
+    }
+
+    // ---- Embedded Linux setup -------------------------------------------------------------
+
+    fun refreshLinuxInstalled() {
+        val installed = EmbeddedTermuxManager(context).isInstalled
+        _state.update { it.copy(isLinuxInstalled = installed) }
+    }
+
+    fun requestLinuxSetup() {
+        _state.update { it.copy(showLinuxSubsystemPrompt = false, showLinuxSetupSheet = true) }
+    }
+
+    fun dismissLinuxPrompt() {
+        _state.update { it.copy(showLinuxSubsystemPrompt = false) }
+    }
+
+    fun startLinuxSetup() {
+        if (_state.value.linuxSetup.isRunning) {
+            _state.update { it.copy(showLinuxSetupSheet = true, showLinuxSubsystemPrompt = false) }
+            return
+        }
+        linuxSetupJob?.cancel()
+        _state.update {
+            it.copy(
+                showLinuxSubsystemPrompt = false,
+                showLinuxSetupSheet = true,
+                linuxSetup = LinuxSetupState(phase = LinuxSetupPhase.CHECKING, message = "Starting"),
+                linuxSetupLog = emptyList()
+            )
+        }
+        linuxSetupJob = viewModelScope.launch {
+            val manager = EmbeddedTermuxManager(context)
+            val ok = manager.installBootstrap(
+                onLog = { line -> _state.update { it.copy(linuxSetupLog = (it.linuxSetupLog + line).takeLast(200)) } },
+                onState = { st -> _state.update { it.copy(linuxSetup = st) } }
+            )
+            if (ok) {
+                terminalSession?.appendOutput("Embedded Linux environment installed. You can now use bash, node, npm, git and pkg.")
+            }
+            _state.update {
+                it.copy(
+                    isLinuxInstalled = manager.isInstalled,
+                    notification = if (ok) "Linux environment is ready" else it.notification
+                )
+            }
+        }
+    }
+
+    fun cancelLinuxSetup() {
+        linuxSetupJob?.cancel()
+    }
+
+    fun dismissLinuxSetupSheet() {
+        _state.update {
+            val finished = it.linuxSetup.phase == LinuxSetupPhase.DONE || it.linuxSetup.phase == LinuxSetupPhase.FAILED
+            it.copy(
+                showLinuxSetupSheet = false,
+                linuxSetup = if (finished) LinuxSetupState() else it.linuxSetup
+            )
+        }
+    }
+
+    // ---- Reviewing AI file changes ---------------------------------------------------------
+
+    fun setShowChangeReview(show: Boolean) {
+        _state.update { it.copy(showChangeReview = show && it.pendingChanges != null) }
+    }
+
+    fun togglePendingFile(path: String) {
+        _state.update { st ->
+            val pending = st.pendingChanges ?: return@update st
+            st.copy(
+                pendingChanges = pending.copy(
+                    files = pending.files.map { if (it.path == path) it.copy(selected = !it.selected) else it }
+                )
+            )
+        }
+    }
+
+    fun setAllPendingSelected(selected: Boolean) {
+        _state.update { st ->
+            val pending = st.pendingChanges ?: return@update st
+            st.copy(pendingChanges = pending.copy(files = pending.files.map { it.copy(selected = selected) }))
+        }
+    }
+
+    fun discardPendingChanges() {
+        val count = _state.value.pendingChanges?.files?.size ?: 0
+        _state.update { it.copy(pendingChanges = null, showChangeReview = false) }
+        if (count > 0) {
+            viewModelScope.launch { persistMessage("AI", "Discarded the proposed changes to $count file(s). Nothing was written.") }
+        }
+    }
+
+    fun applyPendingChanges() {
+        val pending = _state.value.pendingChanges ?: return
+        val record = _state.value.record ?: return
+        val selected = pending.files.filter { it.selected }
+        if (selected.isEmpty()) {
+            discardPendingChanges()
+            return
+        }
+        _state.update { it.copy(pendingChanges = null, showChangeReview = false) }
+
+        viewModelScope.launch {
+            val artifact = CodeArtifact(
+                files = selected.map { SourceFile(it.path, it.newContent) },
+                explanation = pending.summary,
+                previewHtml = selected.firstOrNull { it.path.endsWith("index.html") }?.newContent
+            )
+            val projectDir = projectRepo.saveArtifactToDisk(record.appName, artifact)
+            val updatedFiles = projectRepo.readProjectFiles(projectDir)
+            val tree = projectRepo.getProjectDirectoryTree(projectDir)
+            val updatedHtml = updatedFiles.firstOrNull { it.path.endsWith("index.html") }?.content
+            val currentSelected = _state.value.selectedFile
+            val reSelected = updatedFiles.firstOrNull { it.path == currentSelected?.path }
+                ?: updatedFiles.firstOrNull { it.path.endsWith("index.html") }
+                ?: updatedFiles.firstOrNull()
+
+            runCommandsInOrder(pending.commands)
+
+            val skipped = pending.files.size - selected.size
+            val commandInfo = if (pending.commands.isNotEmpty())
+                "\nRan in terminal: ${pending.commands.joinToString(", ") { "`$it`" }}" else ""
+            persistMessage(
+                "AI",
+                "Applied ${selected.size} file(s) to 'my_projects/${record.appName}/':\n" +
+                    selected.joinToString("\n") { "• ${it.path}" } +
+                    (if (skipped > 0) "\nSkipped $skipped file(s) you did not select." else "") +
+                    commandInfo
+            )
+
+            try {
+                NotificationHelper.notifyAiRefineCompleted(
+                    context = context,
+                    projectName = record.appName,
+                    projectId = record.id,
+                    summary = "Applied ${selected.size} file(s)."
+                )
+            } catch (_: Exception) {}
+
+            _state.update {
+                it.copy(
+                    files = updatedFiles,
+                    directoryTree = tree,
+                    selectedFile = reSelected,
+                    editedContent = reSelected?.content ?: "",
+                    hasUnsavedChanges = false,
+                    previewHtml = updatedHtml ?: it.previewHtml,
+                    notification = "Applied ${selected.size} file(s)"
+                )
+            }
+        }
     }
 
     private fun observeMessagesForSession(sessionId: String) {
@@ -829,10 +1064,17 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         activeAiJob?.cancel()
         activeAiJob = viewModelScope.launch {
             persistMessage("USER", userInstruction)
-            _state.value = _state.value.copy(
-                isAiRefining = true
-            )
+            _state.update {
+                it.copy(
+                    isAiRefining = true,
+                    streamingText = "",
+                    pendingChanges = null,
+                    showChangeReview = false
+                )
+            }
 
+            val linuxInstalled = EmbeddedTermuxManager(context).isInstalled
+            val linuxTag = AiResponse.LINUX_REQUEST_TAG
             val existingSummary = currentFiles.take(8).joinToString("\n---\n") { "${it.path}:\n${it.content.take(1500)}" }
 
             val systemPrompt = """
@@ -864,147 +1106,125 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                    ENDFILE
                    
                 3. If package installations or terminal actions are needed, output COMMAND: <command> lines.
+
+                4. The embedded Linux environment is currently ${if (linuxInstalled) "INSTALLED" else "NOT installed"}.
+                   If it is NOT installed and the task needs it (node, npm, pkg, git, python), include the exact text
+                   $linuxTag once in your reply and do not output COMMAND lines; the app will ask the user to install it.
             """.trimIndent()
 
-            val chatResult = aiRepo.chat(
-                providerId = activePid,
-                systemPrompt = systemPrompt,
-                userPrompt = userInstruction
-            )
-
-            if (chatResult.isSuccess) {
-                val rawAiResponse = chatResult.getOrThrow()
-                val parsedFiles = parseFilesFromAiResponse(rawAiResponse)
-                val parsedCommands = parseCommandsFromAiResponse(rawAiResponse)
-                val conversationalText = extractConversationalText(rawAiResponse, parsedFiles.isNotEmpty() || parsedCommands.isNotEmpty())
-
-                // Execute any terminal commands requested by the AI
-                if (parsedCommands.isNotEmpty()) {
-                    parsedCommands.forEach { cmd ->
-                        executeTerminalCommand(cmd)
+            val buffer = StringBuilder()
+            var streamError: Throwable? = null
+            var lastPublish = 0L
+            try {
+                aiRepo.chatStream(
+                    providerId = activePid,
+                    systemPrompt = systemPrompt,
+                    userPrompt = userInstruction
+                ).collect { delta ->
+                    buffer.append(delta)
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastPublish >= STREAM_PUBLISH_INTERVAL_MS) {
+                        lastPublish = now
+                        val preview = AiResponse.streamingPreview(buffer.toString())
+                        _state.update { it.copy(streamingText = preview) }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                streamError = e
+            }
+            _state.update { it.copy(streamingText = "") }
 
-                if (parsedFiles.isNotEmpty()) {
-                    val artifact = CodeArtifact(
-                        files = parsedFiles,
-                        explanation = conversationalText.ifBlank { "Updated ${parsedFiles.size} project files." },
-                        previewHtml = parsedFiles.firstOrNull { it.path.endsWith("index.html") }?.content
-                    )
-                    val projectDir = projectRepo.saveArtifactToDisk(currentRecord.appName, artifact)
-                    val updatedFiles = projectRepo.readProjectFiles(projectDir)
-                    val tree = projectRepo.getProjectDirectoryTree(projectDir)
-                    val updatedHtml = updatedFiles.firstOrNull { it.path.endsWith("index.html") }?.content
-                    val currentSelected = _state.value.selectedFile
-                    val reSelected = updatedFiles.firstOrNull { it.path == currentSelected?.path }
-                        ?: updatedFiles.firstOrNull { it.path.endsWith("index.html") }
-                        ?: updatedFiles.firstOrNull()
-
-                    val explanationPrefix = if (conversationalText.isNotBlank()) "$conversationalText\n\n" else ""
-                    val commandInfo = if (parsedCommands.isNotEmpty()) "\n⚡ Executed in Terminal: ${parsedCommands.joinToString(", ") { "`$it`" }}\n" else ""
-                    val completionMsg = "${explanationPrefix}✨ Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
-                            parsedFiles.joinToString("\n") { "• ${it.path}" } +
-                            commandInfo +
-                            "\n\nCheck the Preview tab to see the live updates, or the Code & Terminal tabs to inspect the changes."
-                    
-                    persistMessage("AI", completionMsg)
-
-                    try {
-                        NotificationHelper.notifyAiRefineCompleted(
-                            context = context,
-                            projectName = currentRecord.appName,
-                            projectId = currentRecord.id,
-                            summary = "Updated ${parsedFiles.size} file(s) for your prompt."
-                        )
-                    } catch (_: Exception) {}
-
-                    _state.value = _state.value.copy(
-                        isAiRefining = false,
-                        files = updatedFiles,
-                        directoryTree = tree,
-                        selectedFile = reSelected,
-                        editedContent = reSelected?.content ?: "",
-                        hasUnsavedChanges = false,
-                        previewHtml = updatedHtml ?: _state.value.previewHtml,
-                        notification = "Applied updates to project files!"
-                    )
-                } else if (parsedCommands.isNotEmpty()) {
-                    val commandInfo = "⚡ Executed ${parsedCommands.size} command(s) in Embedded Linux Terminal:\n" +
-                            parsedCommands.joinToString("\n") { "• `$it`" } +
-                            "\n\nCheck the Terminal tab to see live execution logs."
-                    val replyText = if (conversationalText.isNotBlank()) "$conversationalText\n\n$commandInfo" else commandInfo
-                    persistMessage("AI", replyText)
-                    _state.value = _state.value.copy(
-                        isAiRefining = false
-                    )
-                } else {
-                    // Conversational response without file updates
-                    val cleanReply = conversationalText.ifBlank { rawAiResponse.trim() }
-                    val replyText = cleanReply.ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
-                    persistMessage("AI", replyText)
-                    _state.value = _state.value.copy(
-                        isAiRefining = false
-                    )
-                }
-            } else {
-                val errorMsg = chatResult.exceptionOrNull()?.localizedMessage ?: "Unknown AI error"
-                val errText = "Could not contact AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
-                persistMessage("AI", errText)
-                _state.value = _state.value.copy(
-                    isAiRefining = false,
-                    notification = "AI request failed."
+            val rawFull = buffer.toString()
+            if (rawFull.isBlank()) {
+                val errorMsg = streamError?.localizedMessage ?: "The AI returned an empty response"
+                persistMessage(
+                    "AI",
+                    "Could not get a reply from the AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
                 )
+                _state.update { it.copy(isAiRefining = false, notification = "AI request failed.") }
+                return@launch
             }
-        }
-    }
 
-    private fun parseCommandsFromAiResponse(raw: String): List<String> {
-        val commands = mutableListOf<String>()
-        val regex = Regex("""(?:COMMAND|RUN|EXEC):\s*([^\r\n]+)""", RegexOption.IGNORE_CASE)
-        for (match in regex.findAll(raw)) {
-            val cmd = match.groupValues[1].trim().removeSurrounding("`").trim()
-            if (cmd.isNotBlank()) {
-                commands.add(cmd)
-            }
-        }
-        return commands
-    }
+            val (rawAiResponse, wantsLinux) = AiResponse.stripLinuxRequest(rawFull)
+            val parsedFiles = AiResponse.parseFiles(rawAiResponse)
+            val parsedCommands = AiResponse.parseCommands(rawAiResponse)
+            val conversationalText = AiResponse.conversationalText(
+                rawAiResponse,
+                parsedFiles.isNotEmpty() || parsedCommands.isNotEmpty()
+            )
+            val interruptedNote = streamError?.let {
+                "\n\n(The reply was cut off: ${it.localizedMessage ?: "connection lost"}. Incomplete files were ignored.)"
+            } ?: ""
 
-    private fun parseFilesFromAiResponse(raw: String): List<SourceFile> {
-        val parsedFiles = mutableListOf<SourceFile>()
-        val primaryRegex = Regex("""FILE:\s*([^\r\n]+)\s*\r?\n```[a-z0-9_-]*\r?\n([\s\S]*?)```(?:\s*\r?\nENDFILE)?""", RegexOption.IGNORE_CASE)
-        for (match in primaryRegex.findAll(raw)) {
-            val path = match.groupValues[1].trim()
-            val content = match.groupValues[2]
-            if (path.isNotBlank() && content.isNotBlank()) {
-                parsedFiles.add(SourceFile(path, content))
+            if (wantsLinux && !EmbeddedTermuxManager(context).isInstalled) {
+                _state.update { it.copy(showLinuxSubsystemPrompt = true) }
             }
-        }
-        if (parsedFiles.isEmpty()) {
-            val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\s*\r?\n```[a-z0-9_-]*\r?\n([\s\S]*?)```""", RegexOption.IGNORE_CASE)
-            for (match in secondaryRegex.findAll(raw)) {
-                val path = match.groupValues[1].trim()
-                val content = match.groupValues[2]
-                if (path.isNotBlank() && content.isNotBlank()) {
-                    parsedFiles.add(SourceFile(path, content))
+
+            if (parsedFiles.isNotEmpty()) {
+                val latestFiles = _state.value.files
+                val changes = withContext(Dispatchers.Default) {
+                    parsedFiles.mapNotNull { file ->
+                        val safePath = AiResponse.safeRelativePath(file.path) ?: return@mapNotNull null
+                        val old = latestFiles.firstOrNull { it.path == safePath }?.content
+                        if (old == file.content) return@mapNotNull null
+                        val stats = LineDiff.stats(LineDiff.diff(old, file.content))
+                        PendingFileChange(safePath, old, file.content, stats.added, stats.removed)
+                    }.distinctBy { it.path }
                 }
+                val rejected = parsedFiles.count { AiResponse.safeRelativePath(it.path) == null }
+                val rejectedNote = if (rejected > 0) "\nIgnored $rejected file(s) with unsafe paths." else ""
+
+                if (changes.isEmpty()) {
+                    persistMessage(
+                        "AI",
+                        (conversationalText.ifBlank { "No changes were needed." } +
+                            "\n\nThe files in this response are identical to what is already in the project." +
+                            rejectedNote + interruptedNote).trim()
+                    )
+                    // Commands are still honored when there are no file edits to review.
+                    runCommandsInOrder(parsedCommands)
+                    _state.update { it.copy(isAiRefining = false) }
+                } else {
+                    val summaryLines = changes.joinToString("\n") {
+                        "• ${it.path} (${if (it.isNew) "new, " else ""}+${it.added} -${it.removed})"
+                    }
+                    val commandNote = if (parsedCommands.isNotEmpty())
+                        "\nAfter you apply, it will also run: ${parsedCommands.joinToString(", ") { "`$it`" }}" else ""
+                    val prefix = if (conversationalText.isNotBlank()) "$conversationalText\n\n" else ""
+                    persistMessage(
+                        "AI",
+                        "${prefix}Proposed changes to ${changes.size} file(s):\n$summaryLines$commandNote$rejectedNote" +
+                            "$interruptedNote\n\nReview the diff and choose what to apply."
+                    )
+                    _state.update {
+                        it.copy(
+                            isAiRefining = false,
+                            pendingChanges = PendingChanges(
+                                files = changes,
+                                commands = parsedCommands,
+                                summary = conversationalText.ifBlank { "Updated ${changes.size} project files." }
+                            ),
+                            showChangeReview = true
+                        )
+                    }
+                }
+            } else if (parsedCommands.isNotEmpty()) {
+                runCommandsInOrder(parsedCommands)
+                val commandInfo = "Ran ${parsedCommands.size} command(s) in the embedded Linux terminal:\n" +
+                    parsedCommands.joinToString("\n") { "• `$it`" } +
+                    "\n\nOpen the Terminal tab to see the output."
+                persistMessage("AI", (if (conversationalText.isNotBlank()) "$conversationalText\n\n$commandInfo" else commandInfo) + interruptedNote)
+                _state.update { it.copy(isAiRefining = false) }
+            } else {
+                // Conversational response without file updates
+                val reply = conversationalText.ifBlank { rawAiResponse.trim() }
+                    .ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
+                persistMessage("AI", reply + interruptedNote)
+                _state.update { it.copy(isAiRefining = false) }
             }
         }
-        return parsedFiles
-    }
-
-    private fun extractConversationalText(raw: String, hasAction: Boolean): String {
-        if (!hasAction) {
-            return raw.trim()
-        }
-        var cleaned = raw
-        val fileBlockRegex = Regex("""FILE:\s*[^\r\n]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```(?:\s*\r?\nENDFILE)?""", RegexOption.IGNORE_CASE)
-        cleaned = fileBlockRegex.replace(cleaned, "")
-        val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)[a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```""", RegexOption.IGNORE_CASE)
-        cleaned = secondaryRegex.replace(cleaned, "")
-        val commandRegex = Regex("""(?:COMMAND|RUN|EXEC):\s*[^\r\n]+""", RegexOption.IGNORE_CASE)
-        cleaned = commandRegex.replace(cleaned, "")
-        return cleaned.trim()
     }
 
     fun exportAsZip(context: Context) {
