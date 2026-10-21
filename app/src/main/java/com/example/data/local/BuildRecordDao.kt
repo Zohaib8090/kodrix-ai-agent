@@ -19,6 +19,9 @@ interface BuildRecordDao {
     @Query("SELECT * FROM build_records WHERE id = :id LIMIT 1")
     suspend fun getRecordDirect(id: String): BuildRecord?
 
+    @Query("SELECT appName FROM build_records")
+    suspend fun getAllAppNames(): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(record: BuildRecord)
 

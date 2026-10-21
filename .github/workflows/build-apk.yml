@@ -67,5 +67,5 @@ jobs:
 
       - name: Job Summary
         run: |
-          echo "### 📱 Android APK Build Succeeded!" >> $GITHUB_STEP_SUMMARY
+          echo "### Android APK Build Succeeded" >> $GITHUB_STEP_SUMMARY
           echo "You can download the **app-debug** artifact from this run and install it directly on your Android phone." >> $GITHUB_STEP_SUMMARY

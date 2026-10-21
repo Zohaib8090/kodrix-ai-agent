@@ -3,19 +3,18 @@ package com.example.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ai.ChatTurn
 import com.example.data.local.AppDatabase
 import com.example.data.local.BuildRecord
 import com.example.data.local.PreferenceStorage
-import com.example.data.model.AppContext
 import com.example.data.model.Blueprint
 import com.example.data.model.BlueprintsData
-import com.example.data.model.CodeArtifact
 import com.example.data.model.PlatformType
 import com.example.data.model.ProviderConfig
 import com.example.data.model.WebFramework
 import com.example.data.services.AiProviderRepository
-import com.example.data.services.NodeService
 import com.example.data.services.ProjectRepository
+import com.example.util.ProjectNaming
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,14 +37,13 @@ data class DashboardUiState(
     val webFramework: WebFramework = WebFramework.REACT_VITE,
     val blueprints: List<Blueprint> = BlueprintsData.webBlueprints,
     val selectedBlueprint: Blueprint = BlueprintsData.webBlueprints.first(),
-    val appName: String = "My App",
+    /** Blank means "derive a name from the prompt when the project is created". */
+    val appName: String = "",
     val prompt: String = "",
     val enabledFeatures: Set<String> = BlueprintsData.webBlueprints.first().defaultFeatures.toSet(),
     val availableProviders: List<ProviderConfig> = emptyList(),
     val selectedCodegenProviderId: String = "gemini",
     val selectedFixProviderId: String = "gemini",
-    val generatedPreviewHtml: String? = null,
-    val isGeneratingPreview: Boolean = false,
     val isLaunchingBuild: Boolean = false,
     val launchedBuildId: String? = null,
     val errorMessage: String? = null,
@@ -60,7 +58,6 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = PreferenceStorage(application)
     private val db = AppDatabase.getInstance(application)
     private val aiRepo = AiProviderRepository(prefs)
-    val nodeService = NodeService(application)
     val projectRepo = ProjectRepository(application)
 
     private val _state = MutableStateFlow(DashboardUiState())
@@ -109,9 +106,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             selectedCodegenProviderId = codegenId,
             selectedFixProviderId = fixId,
             activeProviderId = restoredProvider,
-            activeModel = restoredModel
+            // Show the model that will actually be used (it can change, e.g. when a retired model is migrated)
+            activeModel = providers.firstOrNull { it.id == restoredProvider }?.defaultModel?.ifBlank { null } ?: restoredModel
         )
-        refreshPreview()
     }
 
     fun selectChatProvider(providerId: String) {
@@ -151,12 +148,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             prompt = defaultBp.defaultPrompt,
             enabledFeatures = defaultBp.defaultFeatures.toSet()
         )
-        refreshPreview()
     }
 
     fun onWebFrameworkChanged(framework: WebFramework) {
         _state.value = _state.value.copy(webFramework = framework)
-        refreshPreview()
     }
 
     fun onBlueprintSelected(blueprint: Blueprint) {
@@ -166,24 +161,20 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             enabledFeatures = blueprint.defaultFeatures.toSet(),
             appName = blueprint.title
         )
-        refreshPreview()
     }
 
     fun onAppNameChanged(name: String) {
         _state.value = _state.value.copy(appName = name)
-        refreshPreview()
     }
 
     fun onPromptChanged(prompt: String) {
         _state.value = _state.value.copy(prompt = prompt)
-        refreshPreview()
     }
 
     fun toggleFeature(feature: String, enabled: Boolean) {
         val current = _state.value.enabledFeatures.toMutableSet()
         if (enabled) current.add(feature) else current.remove(feature)
         _state.value = _state.value.copy(enabledFeatures = current)
-        refreshPreview()
     }
 
     fun onCodegenProviderChanged(providerId: String) {
@@ -196,38 +187,6 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.selectedFixProviderId = providerId
     }
 
-    fun refreshPreview() {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(isGeneratingPreview = true)
-            val context = AppContext(
-                appName = _state.value.appName,
-                platform = _state.value.platform,
-                framework = _state.value.webFramework,
-                features = _state.value.enabledFeatures.toList(),
-                prompt = _state.value.prompt
-            )
-            val result = aiRepo.generateCode(
-                providerId = _state.value.selectedCodegenProviderId,
-                prompt = _state.value.prompt,
-                context = context
-            )
-            val artifact = result.getOrNull()
-            if (artifact != null) {
-                // Save real parsed files to disk in kodrix-projects directory
-                val projectDir = projectRepo.saveArtifactToDisk(_state.value.appName, artifact)
-                if (_state.value.platform == PlatformType.WEB) {
-                    // Start local HTTP server on port 5173 to serve the real files
-                    nodeService.startLocalDevServer(projectDir, port = 5173)
-                }
-            }
-            val previewHtml = artifact?.previewHtml
-            _state.value = _state.value.copy(
-                isGeneratingPreview = false,
-                generatedPreviewHtml = previewHtml
-            )
-        }
-    }
-
     fun startBuild(onNavToTracker: (String) -> Unit) {
         val buildId = UUID.randomUUID().toString()
         val currentState = _state.value
@@ -235,9 +194,13 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _state.value = _state.value.copy(isLaunchingBuild = true, errorMessage = null)
 
+            // Each project needs its own folder: derive a name from the prompt and make it unique.
+            val baseName = currentState.appName.trim().ifBlank { ProjectNaming.deriveName(currentState.prompt) }
+            val appName = projectRepo.uniqueProjectName(baseName, db.buildRecordDao().getAllAppNames())
+
             val newRecord = BuildRecord(
                 id = buildId,
-                appName = currentState.appName.ifBlank { currentState.selectedBlueprint.title },
+                appName = appName,
                 platform = currentState.platform.name,
                 framework = currentState.webFramework.name,
                 prompt = currentState.prompt,
@@ -306,7 +269,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                     }
                 }
-                val projectName = extractedName ?: "imported_project_${System.currentTimeMillis() % 10000}"
+                val projectName = projectRepo.uniqueProjectName(
+                    extractedName ?: "imported_project",
+                    db.buildRecordDao().getAllAppNames()
+                )
 
                 val inputStream = context.contentResolver.openInputStream(uri)
                     ?: throw Exception("Could not open selected ZIP file")
@@ -363,7 +329,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
             try {
                 val token = customToken?.trim()?.ifEmpty { null } ?: prefs.githubToken.ifBlank { null }
-                val result = projectRepo.cloneGitHubRepo(trimmed, branch, token)
+                val result = projectRepo.cloneGitHubRepo(trimmed, branch, token, db.buildRecordDao().getAllAppNames())
 
                 if (result.isSuccess) {
                     val (projectDir, projectName) = result.getOrThrow()
@@ -425,10 +391,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 Keep it helpful, clear, and direct.
             """.trimIndent()
 
+            // Send the conversation so far (minus error notices), not just the newest message
+            val history = _chatMessages.value
+                .filterNot { it.sender == ChatSender.AI && it.text.startsWith(ARCHITECT_ERROR_PREFIX) }
+                .map { if (it.sender == ChatSender.USER) ChatTurn.user(it.text) else ChatTurn.assistant(it.text) }
             val chatResult = aiRepo.chat(
                 providerId = providerId,
                 systemPrompt = systemPrompt,
-                userPrompt = trimmed
+                history = ChatTurn.recent(history, maxTurns = 20, maxChars = 24_000)
             )
 
             if (chatResult.isSuccess) {
@@ -449,11 +419,15 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 val errorMsg = chatResult.exceptionOrNull()?.localizedMessage ?: "Failed to connect to AI provider"
                 _chatMessages.value = _chatMessages.value + AiChatMessage(
                     sender = ChatSender.AI,
-                    text = "Architect response error: $errorMsg. Please check your API key in Settings.",
+                    text = "$ARCHITECT_ERROR_PREFIX$errorMsg. Please check your API key in Settings.",
                     suggestedPrompt = trimmed
                 )
             }
             _isChatGenerating.value = false
         }
+    }
+
+    private companion object {
+        const val ARCHITECT_ERROR_PREFIX = "Architect response error: "
     }
 }

@@ -1,9 +1,10 @@
 package com.example.data.services
 
-import com.example.data.ai.AiProvider
 import com.example.data.ai.AiProviderFactory
+import com.example.data.ai.ChatTurn
 import com.example.data.local.PreferenceStorage
 import com.example.data.model.AppContext
+import com.example.data.model.AuthStyle
 import com.example.data.model.CodeArtifact
 import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
@@ -90,23 +91,33 @@ class AiProviderRepository(
         providerId: String,
         systemPrompt: String,
         userPrompt: String
+    ): Result<String> = chat(providerId, systemPrompt, listOf(ChatTurn.user(userPrompt)))
+
+    /** Multi-turn chat; [history] is oldest first and ends with the newest user message. */
+    suspend fun chat(
+        providerId: String,
+        systemPrompt: String,
+        history: List<ChatTurn>
     ): Result<String> {
-        // Prefer the explicitly selected provider if it has a real API key
+        // Prefer the explicitly selected provider if it can actually be called
         val selected = getProviderConfig(providerId)
         val usableConfig = when {
-            selected != null && selected.apiKey.isNotBlank() && selected.apiKey != "dummy_api_key" -> selected
-            else -> preferenceStorage.getProviders()
-                .firstOrNull { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" }
+            selected != null && isUsable(selected) -> selected
+            else -> getUsableProviders().firstOrNull()
                 ?: preferenceStorage.getProviders().firstOrNull()
                 ?: return Result.failure(Exception("No AI provider configured. Please add an API key in Settings → AI & Models."))
         }
 
         val provider = AiProviderFactory.create(usableConfig)
-        return provider.chat(systemPrompt, userPrompt)
+        return provider.chat(systemPrompt, history)
     }
 
     fun getUsableProviders(): List<ProviderConfig> {
-        return preferenceStorage.getProviders()
-            .filter { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" }
+        return preferenceStorage.getProviders().filter { isUsable(it) }
     }
+
+    /** Enabled, and either keyless (local servers such as Ollama) or holding a real API key. */
+    private fun isUsable(config: ProviderConfig): Boolean =
+        config.isEnabled && (config.authStyle == AuthStyle.NONE ||
+            (config.apiKey.isNotBlank() && !PreferenceStorage.isPlaceholderApiKey(config.apiKey)))
 }

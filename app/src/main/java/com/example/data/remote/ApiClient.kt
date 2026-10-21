@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import com.example.BuildConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Interceptor
@@ -10,6 +11,10 @@ import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
+
+    // Request URLs can carry credentials, so only log them in debug builds.
+    private val httpLogLevel: HttpLoggingInterceptor.Level
+        get() = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
 
     private val moshi = Moshi.Builder()
         .addLast(KotlinJsonAdapterFactory())
@@ -30,7 +35,7 @@ object ApiClient {
         }
 
         val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            level = httpLogLevel
         }
 
         val okHttpClient = OkHttpClient.Builder()
@@ -64,7 +69,7 @@ object ApiClient {
 
     fun createGenericOkHttpClient(timeoutSeconds: Long = 10): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            level = httpLogLevel
         }
         return OkHttpClient.Builder()
             .addInterceptor(logging)
@@ -75,9 +80,18 @@ object ApiClient {
             .build()
     }
 
+    /**
+     * Shared client for AI provider calls. Generating a whole project can take several minutes,
+     * so reads get a long timeout; sharing one instance reuses its connection pool and threads
+     * instead of creating a new client for every request.
+     */
+    val aiHttpClient: OkHttpClient by lazy { createAiHttpClient(AI_READ_TIMEOUT_SECONDS) }
+
+    private const val AI_READ_TIMEOUT_SECONDS = 300L
+
     fun createAiHttpClient(timeoutSeconds: Long = 60): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            level = httpLogLevel
         }
         return OkHttpClient.Builder()
             .addInterceptor(logging)

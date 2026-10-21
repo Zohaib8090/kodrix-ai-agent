@@ -10,7 +10,14 @@ import org.json.JSONObject
 
 class PreferenceStorage(context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences("nocode_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_FILE_NAME, Context.MODE_PRIVATE)
+
+    /** Note: SharedPreferences keeps only a weak reference, so callers must hold on to [listener]. */
+    fun registerChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+
+    fun unregisterChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
 
     var githubToken: String
         get() = prefs.getString(KEY_GH_TOKEN, "") ?: ""
@@ -224,7 +231,9 @@ class PreferenceStorage(context: Context) {
                         name = obj.optString("name"),
                         apiKey = obj.optString("apiKey"),
                         baseUrl = obj.optString("baseUrl"),
-                        authStyle = AuthStyle.valueOf(obj.optString("authStyle", AuthStyle.BEARER.name)),
+                        // An unknown value must not throw: that would reset every saved provider and key.
+                        authStyle = runCatching { AuthStyle.valueOf(obj.optString("authStyle", AuthStyle.BEARER.name)) }
+                            .getOrDefault(AuthStyle.BEARER),
                         defaultModel = obj.optString("defaultModel"),
                         lastVerifiedAt = obj.optLong("lastVerifiedAt", 0L),
                         isValid = obj.optBoolean("isValid", false),
@@ -241,10 +250,20 @@ class PreferenceStorage(context: Context) {
                     )
                 )
             }
-            if (list.isEmpty()) getDefaultProviders() else list
+            if (list.isEmpty()) getDefaultProviders() else list.map { migrateRetiredModels(it) }
         } catch (e: Exception) {
             getDefaultProviders()
         }
+    }
+
+    /** Moves Claude providers off model IDs that the API no longer serves. */
+    private fun migrateRetiredModels(config: ProviderConfig): ProviderConfig {
+        if (config.id != "anthropic" && !config.id.startsWith("custom_anthropic")) return config
+        val models = config.availableModels.filterNot { it in RETIRED_ANTHROPIC_MODELS }
+        val defaultModel = if (config.defaultModel in RETIRED_ANTHROPIC_MODELS) DEFAULT_ANTHROPIC_MODEL else config.defaultModel
+        if (models == config.availableModels && defaultModel == config.defaultModel) return config
+        val mergedModels = (getDefaultModelsForProvider("anthropic") + models).distinct()
+        return config.copy(defaultModel = defaultModel, availableModels = mergedModels)
     }
 
     fun saveProviders(providers: List<ProviderConfig>) {
@@ -299,7 +318,7 @@ class PreferenceStorage(context: Context) {
         return when (providerId.lowercase()) {
             "gemini" -> listOf("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-pro")
             "openai" -> listOf("gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "gpt-4.5-preview")
-            "anthropic", "claude" -> listOf("claude-3-7-sonnet", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229")
+            "anthropic", "claude" -> listOf(DEFAULT_ANTHROPIC_MODEL, "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1")
             "groq" -> listOf("llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
             "deepseek" -> listOf("deepseek-chat", "deepseek-reasoner", "deepseek-v3")
             "openrouter" -> emptyList()
@@ -310,7 +329,8 @@ class PreferenceStorage(context: Context) {
 
     private fun getDefaultProviders(): List<ProviderConfig> {
         val defaultGeminiKey = try {
-            BuildConfig::class.java.getField("GEMINI_API_KEY").get(null) as? String ?: ""
+            (BuildConfig::class.java.getField("GEMINI_API_KEY").get(null) as? String ?: "")
+                .takeUnless { isPlaceholderApiKey(it) } ?: ""
         } catch (e: Exception) {
             ""
         }
@@ -347,7 +367,7 @@ class PreferenceStorage(context: Context) {
                 apiKey = "",
                 baseUrl = "https://api.anthropic.com/v1",
                 authStyle = AuthStyle.X_API_KEY,
-                defaultModel = "claude-3-7-sonnet",
+                defaultModel = DEFAULT_ANTHROPIC_MODEL,
                 supportsVision = true,
                 isEnabled = true,
                 availableModels = getDefaultModelsForProvider("anthropic")
@@ -379,6 +399,19 @@ class PreferenceStorage(context: Context) {
 
     companion object {
         const val DEFAULT_GITHUB_CLIENT_ID = "Ov23liNWCYhzl36uNg6b"
+        /** Holds API keys and tokens; excluded from cloud backup in res/xml/backup_rules.xml. */
+        const val PREFS_FILE_NAME = "nocode_prefs"
+        const val DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
+
+        private val RETIRED_ANTHROPIC_MODELS = setOf(
+            "claude-3-7-sonnet", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229", "claude-3-haiku-20240307"
+        )
+
+        // Build-time stand-ins (.env.example, CI) that look like keys but can never authenticate.
+        private val PLACEHOLDER_API_KEYS = setOf("dummy_api_key", "AIzaSyPlaceholderKeyForBuildOnly")
+
+        fun isPlaceholderApiKey(key: String): Boolean = key.trim() in PLACEHOLDER_API_KEYS
         private const val KEY_GH_CLIENT_ID = "key_gh_client_id"
         private const val KEY_AUTH_METHOD = "key_auth_method"
         private const val KEY_GH_TOKEN = "key_gh_token"

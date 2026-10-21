@@ -98,7 +98,9 @@ data class SourceFile(
 data class CodeArtifact(
     val files: List<SourceFile>,
     val explanation: String,
-    val previewHtml: String? = null
+    val previewHtml: String? = null,
+    /** Files the AI started but did not finish (response cut off); they were not saved. */
+    val incompleteFiles: List<String> = emptyList()
 )
 
 data class DiffProposal(

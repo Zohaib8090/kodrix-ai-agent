@@ -82,6 +82,27 @@ fun ProjectWorkspaceScreen(
         }
     }
 
+    // The AI asked for the embedded Linux environment (it replied with <REQUEST_LINUX_SUBSYSTEM>)
+    if (state.showLinuxSubsystemPrompt) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissLinuxSubsystemPrompt() },
+            icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
+            title = { Text("Set up the Linux environment?") },
+            text = {
+                Text(
+                    "This request needs tools such as Node.js and npm. Kodrix can download its embedded " +
+                        "Linux environment and install it inside the app. Progress is shown in the Terminal tab."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.startLinuxSubsystemSetup() }) { Text("Install") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissLinuxSubsystemPrompt() }) { Text("Not now") }
+            }
+        )
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -518,10 +539,10 @@ private fun AiChatTab(
     }
 
     val promptSuggestions = listOf(
-        "✨ Add a dark mode toggle",
+        "Add a dark mode toggle",
         "Make responsive for mobile",
         "Improve colors & typography",
-        "⚡ Add interactive animations"
+        "Add interactive animations"
     )
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -2400,7 +2421,6 @@ private fun TerminalTab(
                     val textColor = when {
                         line.startsWith("$ ") -> Color(0xFF4ADE80) // Green command
                         line.startsWith(">> ") -> Color(0xFF38BDF8) // Cyan progress
-                        line.startsWith("✓ ") -> Color(0xFFFACC15) // Yellow success
                         line.contains("error", ignoreCase = true) || line.contains("failed", ignoreCase = true) || line.contains("fatal", ignoreCase = true) -> Color(0xFFF87171) // Red error
                         line.startsWith("[Exit") -> Color(0xFFA78BFA) // Purple exit code
                         else -> Color(0xFFCBD5E1) // Light gray normal text

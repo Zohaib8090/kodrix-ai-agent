@@ -7,6 +7,10 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ai.AiResponseParser
+import com.example.data.ai.BaseAiProvider
+import com.example.data.ai.ChatTurn
+import com.example.data.ai.ProjectContextBuilder
 import com.example.data.local.AppDatabase
 import com.example.data.local.BuildRecord
 import com.example.data.local.PreferenceStorage
@@ -19,6 +23,7 @@ import com.example.data.model.ProviderConfig
 import com.example.data.model.SourceFile
 import com.example.data.model.WebFramework
 import com.example.data.services.AiProviderRepository
+import com.example.data.services.EmbeddedTermuxManager
 import com.example.data.services.NodeService
 import com.example.data.services.ProjectFileNode
 import com.example.data.services.ProjectRepository
@@ -270,6 +275,18 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
     }
 
     fun loadProject(projectId: String) {
+        // The screen calls this every time it re-enters composition (rotation, coming back from
+        // Settings). Reloading would restart onboarding, the dev server and the terminal session,
+        // so for the project that is already open only refresh the provider list.
+        if (_state.value.record?.id == projectId) {
+            val providers = aiRepo.getProviders().filter { it.isEnabled }
+            _state.value = _state.value.copy(
+                availableProviders = providers,
+                activeProviderName = providers.firstOrNull { it.id == _state.value.activeProviderId }?.name
+                    ?: _state.value.activeProviderName
+            )
+            return
+        }
         activeAiJob?.cancel()
         chatSessionsJob?.cancel()
         chatMessagesJob?.cancel()
@@ -448,6 +465,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 val allMsgs = if (aiMsg != null) listOf(userOpeningMsg, aiMsg) else listOf(userOpeningMsg)
                 _state.value = _state.value.copy(
                     onboardingConversation = allMsgs,
+                    isOnboarding = false,
                     isOnboardingThinking = false
                 )
                 val enriched = buildEnrichedPrompt(_state.value.onboardingConversation, record.prompt)
@@ -467,7 +485,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             val errorDetails = firstQuestion.exceptionOrNull()?.message ?: "Unable to connect to AI provider"
             val aiMsg = persistMessage(
                 "AI",
-                "⚠️ Could not connect to ${_state.value.activeProviderName}:\n\n$errorDetails\n\nPlease configure your API key for ${_state.value.activeProviderName} in Settings (top-right gear icon), then reply here to continue."
+                "${ERROR_PREFIX}Could not connect to ${_state.value.activeProviderName}:\n\n$errorDetails\n\nPlease configure your API key for ${_state.value.activeProviderName} in Settings (top-right gear icon), then reply here to continue."
             )
             val conversation = listOf(userOpeningMsg, aiMsg)
             _state.value = _state.value.copy(
@@ -498,18 +516,10 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 isOnboardingThinking = true
             )
 
-            // Build conversation history for AI context
-            val historyText = updatedConversation.joinToString("\n") {
-                "${if (it.sender == "USER") "User" else "Kodrix"}: ${it.message}"
-            }
-
             val systemPrompt = """
                 You are Kodrix, a friendly and expert AI app builder.
                 You are gathering requirements to build an app for a user.
-                Below is your conversation so far.
-                
-                Conversation:
-                $historyText
+                The conversation so far is in the messages.
                 
                 Based on what you know now:
                 - If you still need ONE more critical piece of information, ask ONLY that one question (1-3 sentences, friendly).
@@ -522,7 +532,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
             val aiReply = aiRepo.chat(
                 providerId = _state.value.activeProviderId,
                 systemPrompt = systemPrompt,
-                userPrompt = trimmed
+                history = toChatTurns(updatedConversation.map { it.sender to it.message })
             )
 
             if (aiReply.isSuccess) {
@@ -547,9 +557,10 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 }
             } else {
                 // AI error — keep onboarding going, show error
-                val errorMsg = persistMessage(
+                val reason = aiReply.exceptionOrNull()?.message ?: "Unknown error"
+                persistMessage(
                     "AI",
-                    "Sorry, I had trouble reaching the AI. Please check your API key in Settings, then try replying again."
+                    "${ERROR_PREFIX}Could not reach the AI provider: $reason\n\nPlease check your API key in Settings, then try replying again."
                 )
                 _state.value = _state.value.copy(
                     isOnboardingThinking = false
@@ -593,6 +604,8 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
     private suspend fun generateProjectCode(record: BuildRecord, projectDir: File) {
         _state.value = _state.value.copy(
+            // Requirements gathering is over: later chat messages are change requests
+            isOnboarding = false,
             isGenerating = true,
             statusText = "Contacting ${_state.value.activeProviderName} to write application code..."
         )
@@ -623,7 +636,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
             persistMessage(
                 "AI",
-                "❌ Code generation failed:\n\n$errorReason\n\nPlease check your API key in Settings, verify your provider connection, and try again."
+                "${ERROR_PREFIX}Code generation failed:\n\n$errorReason\n\nPlease check your API key in Settings, verify your provider connection, and try again."
             )
 
             _state.value = _state.value.copy(
@@ -673,10 +686,16 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
         persistMessage(
             "AI",
-            "✨ I've built your application '${record.appName}'!\n\n" +
+            "I've built your application '${record.appName}'.\n\n" +
                     "Generated ${freshFiles.size} project file(s) in 'my_projects/${record.appName}/':\n" +
                     freshFiles.joinToString("\n") { "• ${it.path}" } +
-                    "\n\nUse the bottom navigation to view the live Preview, inspect Code files in the directory, or chat with me for modifications."
+                    "\n\nUse the bottom navigation to view the live Preview, inspect Code files in the directory, or chat with me for modifications." +
+                    if (artifact.incompleteFiles.isNotEmpty()) {
+                        "\n\nThe response was cut off, so these files were not created: ${artifact.incompleteFiles.joinToString()}. " +
+                            "Ask me to add them."
+                    } else {
+                        ""
+                    }
         )
 
         _state.value = _state.value.copy(
@@ -825,6 +844,7 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         val currentRecord = _state.value.record ?: return
         val currentFiles = _state.value.files
         val activePid = _state.value.activeProviderId
+        val openFilePath = _state.value.selectedFile?.path
 
         activeAiJob?.cancel()
         activeAiJob = viewModelScope.launch {
@@ -833,57 +853,62 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                 isAiRefining = true
             )
 
-            val existingSummary = currentFiles.take(8).joinToString("\n---\n") { "${it.path}:\n${it.content.take(1500)}" }
+            val linuxInstalled = withContext(Dispatchers.IO) { EmbeddedTermuxManager(context).isInstalled }
+            val projectContext = ProjectContextBuilder.describeFiles(currentFiles, MAX_PROJECT_CONTEXT_CHARS, openFilePath)
+            val systemPrompt = buildRefineSystemPrompt(currentRecord, projectContext, linuxInstalled)
 
-            val systemPrompt = """
-                You are an expert AI software developer and project assistant for the ${currentRecord.platform} application '${currentRecord.appName}'.
-                
-                The project currently has these source files:
-                $existingSummary
-
-                EMBEDDED LINUX / TERMUX TERMINAL ACCESS:
-                You have full access to execute real terminal commands in the embedded Termux Linux environment (npm, node, pkg, apt, git, curl, wget, python, bash, sh).
-                To execute terminal commands, output:
-                COMMAND: your_command_here
-                For example:
-                COMMAND: npm install axios
-                COMMAND: pkg install -y python git
-                COMMAND: curl -O https://example.com/asset.png
-
-                CRITICAL INSTRUCTIONS:
-                1. If the user is greeting (e.g. 'hi', 'hello', 'hey'), asking a general question, asking for project guidance, or having a conversation without requesting code edits or commands:
-                   Respond conversationally, politely, and helpfully. DO NOT generate empty code files or template files.
-                
-                2. If the user is requesting modifications, bug fixes, design adjustments, or new features:
-                   First write a 1-2 sentence friendly summary of what you modified.
-                   Then output each modified or new file using the EXACT format:
-                   FILE: relative/path/to/file.ext
-                   ```[language]
-                   [full complete code for the file]
-                   ```
-                   ENDFILE
-                   
-                3. If package installations or terminal actions are needed, output COMMAND: <command> lines.
-            """.trimIndent()
+            // The whole recent conversation, so follow-ups like "undo that" or "make it bigger" work.
+            val sessionId = _state.value.activeChatSession?.id
+            val transcript = if (sessionId != null) {
+                db.projectChatDao().getDirectMessagesForSession(sessionId).map { it.sender to it.message }
+            } else {
+                listOf("USER" to userInstruction)
+            }
 
             val chatResult = aiRepo.chat(
                 providerId = activePid,
                 systemPrompt = systemPrompt,
-                userPrompt = userInstruction
+                history = toChatTurns(transcript)
             )
 
             if (chatResult.isSuccess) {
                 val rawAiResponse = chatResult.getOrThrow()
-                val parsedFiles = parseFilesFromAiResponse(rawAiResponse)
-                val parsedCommands = parseCommandsFromAiResponse(rawAiResponse)
-                val conversationalText = extractConversationalText(rawAiResponse, parsedFiles.isNotEmpty() || parsedCommands.isNotEmpty())
+                val parsedFiles = AiResponseParser.parseFiles(rawAiResponse)
+                val incompleteFiles = AiResponseParser.parseIncompleteFilePaths(rawAiResponse)
+                val parsedCommands = AiResponseParser.parseCommands(rawAiResponse)
+                val conversationalText = AiResponseParser.extractConversationalText(rawAiResponse)
 
-                // Execute any terminal commands requested by the AI
-                if (parsedCommands.isNotEmpty()) {
-                    parsedCommands.forEach { cmd ->
-                        executeTerminalCommand(cmd)
-                    }
+                // Commands are queued and run one after another in the terminal session
+                parsedCommands.forEach { cmd ->
+                    executeTerminalCommand(cmd)
                 }
+                if (AiResponseParser.requestsLinuxSubsystem(rawAiResponse) && !linuxInstalled) {
+                    _state.value = _state.value.copy(showLinuxSubsystemPrompt = true)
+                }
+
+                val reply = buildString {
+                    if (conversationalText.isNotBlank()) append(conversationalText)
+                    if (parsedFiles.isNotEmpty()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append("Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n")
+                        append(parsedFiles.joinToString("\n") { "• ${it.path}" })
+                    }
+                    if (incompleteFiles.isNotEmpty()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append("The response was cut off, so these files were left unchanged: ${incompleteFiles.joinToString()}.")
+                    }
+                    if (parsedCommands.isNotEmpty()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append("Running in Terminal:\n")
+                        append(parsedCommands.joinToString("\n") { "• `$it`" })
+                    }
+                    if (parsedFiles.isNotEmpty()) {
+                        append("\n\nCheck the Preview tab to see the live updates, or the Code & Terminal tabs to inspect the changes.")
+                    }
+                }.ifBlank { rawAiResponse.trim() }
+                    .ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
+
+                persistMessage("AI", reply)
 
                 if (parsedFiles.isNotEmpty()) {
                     val artifact = CodeArtifact(
@@ -899,15 +924,6 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                     val reSelected = updatedFiles.firstOrNull { it.path == currentSelected?.path }
                         ?: updatedFiles.firstOrNull { it.path.endsWith("index.html") }
                         ?: updatedFiles.firstOrNull()
-
-                    val explanationPrefix = if (conversationalText.isNotBlank()) "$conversationalText\n\n" else ""
-                    val commandInfo = if (parsedCommands.isNotEmpty()) "\n⚡ Executed in Terminal: ${parsedCommands.joinToString(", ") { "`$it`" }}\n" else ""
-                    val completionMsg = "${explanationPrefix}✨ Updated ${parsedFiles.size} file(s) in 'my_projects/${currentRecord.appName}/':\n" +
-                            parsedFiles.joinToString("\n") { "• ${it.path}" } +
-                            commandInfo +
-                            "\n\nCheck the Preview tab to see the live updates, or the Code & Terminal tabs to inspect the changes."
-                    
-                    persistMessage("AI", completionMsg)
 
                     try {
                         NotificationHelper.notifyAiRefineCompleted(
@@ -928,27 +944,14 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
                         previewHtml = updatedHtml ?: _state.value.previewHtml,
                         notification = "Applied updates to project files!"
                     )
-                } else if (parsedCommands.isNotEmpty()) {
-                    val commandInfo = "⚡ Executed ${parsedCommands.size} command(s) in Embedded Linux Terminal:\n" +
-                            parsedCommands.joinToString("\n") { "• `$it`" } +
-                            "\n\nCheck the Terminal tab to see live execution logs."
-                    val replyText = if (conversationalText.isNotBlank()) "$conversationalText\n\n$commandInfo" else commandInfo
-                    persistMessage("AI", replyText)
-                    _state.value = _state.value.copy(
-                        isAiRefining = false
-                    )
                 } else {
-                    // Conversational response without file updates
-                    val cleanReply = conversationalText.ifBlank { rawAiResponse.trim() }
-                    val replyText = cleanReply.ifBlank { "Hello! How can I assist you with '${currentRecord.appName}' today?" }
-                    persistMessage("AI", replyText)
                     _state.value = _state.value.copy(
                         isAiRefining = false
                     )
                 }
             } else {
                 val errorMsg = chatResult.exceptionOrNull()?.localizedMessage ?: "Unknown AI error"
-                val errText = "Could not contact AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
+                val errText = "${ERROR_PREFIX}Could not contact AI provider: $errorMsg. Please check your API key in Settings → AI & Models."
                 persistMessage("AI", errText)
                 _state.value = _state.value.copy(
                     isAiRefining = false,
@@ -958,53 +961,57 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
         }
     }
 
-    private fun parseCommandsFromAiResponse(raw: String): List<String> {
-        val commands = mutableListOf<String>()
-        val regex = Regex("""(?:COMMAND|RUN|EXEC):\s*([^\r\n]+)""", RegexOption.IGNORE_CASE)
-        for (match in regex.findAll(raw)) {
-            val cmd = match.groupValues[1].trim().removeSurrounding("`").trim()
-            if (cmd.isNotBlank()) {
-                commands.add(cmd)
-            }
+    private fun buildRefineSystemPrompt(record: BuildRecord, projectContext: String, linuxInstalled: Boolean): String {
+        val terminalStatus = if (linuxInstalled) {
+            "The embedded Linux environment is installed: real npm, node, pkg, apt, git, curl, python and bash commands work."
+        } else {
+            "The embedded Linux environment is NOT installed yet. Only basic file commands (ls, cat, mkdir, rm -r, touch, echo), " +
+                "curl, wget, unzip and downloading public GitHub repositories with git clone work; npm, node, pkg and python do not.\n" +
+                "If the request needs npm, node, python or other packages, include the exact tag " +
+                "${AiResponseParser.LINUX_SUBSYSTEM_TAG} in your reply so Kodrix can offer to install the environment, " +
+                "and do not output COMMAND lines that need it."
         }
-        return commands
+        return listOf(
+            "You are an expert AI software developer and project assistant for the ${record.platform} application '${record.appName}'.",
+            "",
+            projectContext,
+            "",
+            "EMBEDDED LINUX TERMINAL:",
+            terminalStatus,
+            "To run a terminal command, put it on its own line starting with COMMAND:, for example:",
+            "COMMAND: npm install axios",
+            "",
+            "INSTRUCTIONS:",
+            "1. If the user is greeting you, asking a question, or chatting without requesting changes, reply conversationally and do not output any files.",
+            "2. If the user requests modifications, bug fixes, design adjustments or new features, first write a 1-2 sentence summary of what you changed, " +
+                "then output every modified or new file in full using this exact format:",
+            BaseAiProvider.FILE_FORMAT_INSTRUCTIONS,
+            "3. Only rewrite files whose full contents are shown above. Files marked [${ProjectContextBuilder.OMITTED_NOTE}] have not been shown to you: " +
+                "do not output them; tell the user which file you would change and how.",
+            "4. Never output partial files or placeholders such as \"rest of the code unchanged\".",
+            "5. If package installations or other terminal actions are needed, output COMMAND: lines."
+        ).joinToString("\n")
     }
 
-    private fun parseFilesFromAiResponse(raw: String): List<SourceFile> {
-        val parsedFiles = mutableListOf<SourceFile>()
-        val primaryRegex = Regex("""FILE:\s*([^\r\n]+)\s*\r?\n```[a-z0-9_-]*\r?\n([\s\S]*?)```(?:\s*\r?\nENDFILE)?""", RegexOption.IGNORE_CASE)
-        for (match in primaryRegex.findAll(raw)) {
-            val path = match.groupValues[1].trim()
-            val content = match.groupValues[2]
-            if (path.isNotBlank() && content.isNotBlank()) {
-                parsedFiles.add(SourceFile(path, content))
-            }
-        }
-        if (parsedFiles.isEmpty()) {
-            val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\s*\r?\n```[a-z0-9_-]*\r?\n([\s\S]*?)```""", RegexOption.IGNORE_CASE)
-            for (match in secondaryRegex.findAll(raw)) {
-                val path = match.groupValues[1].trim()
-                val content = match.groupValues[2]
-                if (path.isNotBlank() && content.isNotBlank()) {
-                    parsedFiles.add(SourceFile(path, content))
-                }
-            }
-        }
-        return parsedFiles
+    /** Chat transcript (sender to text, oldest first) as provider turns, without Kodrix's own error notices. */
+    private fun toChatTurns(transcript: List<Pair<String, String>>): List<ChatTurn> {
+        val turns = transcript
+            .filterNot { (sender, text) -> sender != "USER" && text.startsWith(ERROR_PREFIX) }
+            .map { (sender, text) -> if (sender == "USER") ChatTurn.user(text) else ChatTurn.assistant(text) }
+        return ChatTurn.recent(turns, MAX_HISTORY_TURNS, MAX_HISTORY_CHARS)
     }
 
-    private fun extractConversationalText(raw: String, hasAction: Boolean): String {
-        if (!hasAction) {
-            return raw.trim()
-        }
-        var cleaned = raw
-        val fileBlockRegex = Regex("""FILE:\s*[^\r\n]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```(?:\s*\r?\nENDFILE)?""", RegexOption.IGNORE_CASE)
-        cleaned = fileBlockRegex.replace(cleaned, "")
-        val secondaryRegex = Regex("""(?:###\s*|\*\*File:?\*\*\s*|File:\s*)[a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+\s*\r?\n```[a-z0-9_-]*\r?\n[\s\S]*?```""", RegexOption.IGNORE_CASE)
-        cleaned = secondaryRegex.replace(cleaned, "")
-        val commandRegex = Regex("""(?:COMMAND|RUN|EXEC):\s*[^\r\n]+""", RegexOption.IGNORE_CASE)
-        cleaned = commandRegex.replace(cleaned, "")
-        return cleaned.trim()
+    fun dismissLinuxSubsystemPrompt() {
+        _state.value = _state.value.copy(showLinuxSubsystemPrompt = false)
+    }
+
+    /** Accepts the AI's request to install the embedded Linux environment. */
+    fun startLinuxSubsystemSetup() {
+        _state.value = _state.value.copy(
+            showLinuxSubsystemPrompt = false,
+            activeTab = WorkspaceBottomNav.TERMINAL
+        )
+        executeTerminalCommand("setup-termux")
     }
 
     fun exportAsZip(context: Context) {
@@ -1053,5 +1060,19 @@ class ProjectWorkspaceViewModel(application: Application) : AndroidViewModel(app
 
     fun clearNotification() {
         _state.value = _state.value.copy(notification = null)
+    }
+
+    override fun onCleared() {
+        terminalSession?.destroy()
+        _state.value.record?.let { nodeService.stopLocalDevServer(projectRepo.getProjectDir(it.appName)) }
+        super.onCleared()
+    }
+
+    companion object {
+        /** Marks Kodrix's own error notices in the chat so they are not sent back to the model. */
+        private const val ERROR_PREFIX = "Error: "
+        private const val MAX_PROJECT_CONTEXT_CHARS = 60_000
+        private const val MAX_HISTORY_TURNS = 20
+        private const val MAX_HISTORY_CHARS = 24_000
     }
 }

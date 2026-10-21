@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -98,10 +99,26 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
+    // MainActivity and the Settings screen each hold their own instance; this keeps the theme
+    // applied by MainActivity in sync with changes made on the Settings screen.
+    private val appearanceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        val themeMode = prefs.themeMode
+        val accentColor = prefs.accentColor
+        if (themeMode != _state.value.themeMode || accentColor != _state.value.accentColor) {
+            _state.value = _state.value.copy(themeMode = themeMode, accentColor = accentColor)
+        }
+    }
+
     init {
         loadSettings()
         observeBuildRecords()
         calculateCacheSize()
+        prefs.registerChangeListener(appearanceListener)
+    }
+
+    override fun onCleared() {
+        prefs.unregisterChangeListener(appearanceListener)
+        super.onCleared()
     }
 
     private fun loadSettings() {

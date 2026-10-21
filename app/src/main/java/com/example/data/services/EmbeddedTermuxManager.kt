@@ -159,14 +159,14 @@ class EmbeddedTermuxManager(private val context: Context) {
                         }
                     }
                     val mb = bytesRead / (1024 * 1024)
-                    onLog("✓ Download complete ($mb MB). Extracting full Linux rootfs...")
+                    onLog("Download complete ($mb MB). Extracting full Linux rootfs...")
                     downloaded = true
                     break
                 } else {
-                    onLog("⚠️ Mirror returned HTTP ${conn.responseCode}, checking next mirror...")
+                    onLog("Mirror returned HTTP ${conn.responseCode}, checking next mirror...")
                 }
             } catch (e: Exception) {
-                onLog("⚠️ Mirror error: ${e.message}")
+                onLog("Mirror error: ${e.message}")
             }
         }
 
@@ -212,7 +212,7 @@ class EmbeddedTermuxManager(private val context: Context) {
             }
 
             tempZip.delete()
-            onLog("✓ Extracted $extractedCount core Linux packages and binaries.")
+            onLog("Extracted $extractedCount core Linux packages and binaries.")
 
             // Create symlinks if any
             symlinksToCreate.forEach { (dest, src) ->
@@ -232,10 +232,10 @@ class EmbeddedTermuxManager(private val context: Context) {
             // Setup resolv.conf and sources.list
             setupConfigFiles(onLog)
 
-            onLog("Full Embedded Termux Linux Userspace is ACTIVE (aarch64)!")
+            onLog("Full Embedded Termux Linux Userspace is ACTIVE ($arch).")
             return@withContext true
         } catch (e: Exception) {
-            onLog("⚠️ Extraction error: ${e.message}")
+            onLog("Extraction error: ${e.message}")
             setupConfigFiles(onLog)
             return@withContext false
         }

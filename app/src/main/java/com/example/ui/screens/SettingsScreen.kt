@@ -1071,7 +1071,7 @@ fun SettingsScreen(
                                     )
                                 }
                                 Text(
-                                    text = "â€¢ Web = Local Termux Linux + Node + localhost WebView + auto logs to AI\nâ€¢ APK = GitHub Actions workflow auto-generated + push = APK artifact",
+                                    text = "• Web = Local Termux Linux + Node + localhost WebView + auto logs to AI\n• APK = GitHub Actions workflow auto-generated + push = APK artifact",
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 12.sp,
                                     lineHeight = 18.sp,
@@ -1560,7 +1560,7 @@ fun SettingsScreen(
                                         )
                                     }
                                     Text(
-                                        text = "${record.platform} â€¢ ${record.framework}",
+                                        text = "${record.platform} • ${record.framework}",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -2110,7 +2110,7 @@ private fun ProviderManagementCard(
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                                 ) {
                                     Text(
-                                        text = "ðŸ§  ${provider.thinkingLevel.uppercase()}",
+                                        text = "Thinking: ${provider.thinkingLevel.uppercase()}",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,

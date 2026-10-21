@@ -3,12 +3,15 @@ package com.example.data.services
 import android.content.Context
 import com.example.data.model.CodeArtifact
 import com.example.data.model.SourceFile
+import com.example.util.ProjectNaming
+import com.example.util.SafePaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 data class ProjectFileNode(
@@ -30,14 +33,27 @@ class ProjectRepository(private val context: Context) {
         get() = File(context.filesDir, "my_projects").apply { mkdirs() }
 
     fun getProjectDir(projectName: String): File {
-        val sanitized = projectName.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_").ifEmpty { "default_project" }
-        return File(rootProjectsDir, sanitized).apply { mkdirs() }
+        return File(rootProjectsDir, ProjectNaming.toDirectoryName(projectName)).apply { mkdirs() }
     }
 
+    /**
+     * Returns a name based on [baseName] whose folder is not used by an existing project folder
+     * or by any name in [takenNames] (for example the app names already stored in Room).
+     */
+    suspend fun uniqueProjectName(baseName: String, takenNames: Collection<String> = emptyList()): String =
+        withContext(Dispatchers.IO) {
+            val existingDirs = rootProjectsDir.listFiles()?.filter { it.isDirectory }?.map { it.name }.orEmpty()
+            ProjectNaming.uniqueName(baseName, takenNames + existingDirs)
+        }
+
+    /**
+     * Writes every file of [artifact] into the project folder. Paths that would land outside the
+     * project folder (absolute escapes or "../") are skipped rather than written.
+     */
     suspend fun saveArtifactToDisk(projectName: String, artifact: CodeArtifact): File = withContext(Dispatchers.IO) {
         val projectDir = getProjectDir(projectName)
         for (file in artifact.files) {
-            val target = File(projectDir, file.path)
+            val target = SafePaths.resolveInside(projectDir, file.path) ?: continue
             target.parentFile?.mkdirs()
             target.writeText(file.content)
         }
@@ -46,7 +62,7 @@ class ProjectRepository(private val context: Context) {
 
     suspend fun saveFile(projectDir: File, relativePath: String, content: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val target = File(projectDir, relativePath)
+            val target = SafePaths.resolveInside(projectDir, relativePath) ?: return@withContext false
             target.parentFile?.mkdirs()
             target.writeText(content)
             true
@@ -57,7 +73,7 @@ class ProjectRepository(private val context: Context) {
 
     suspend fun createNewFolder(projectDir: File, relativePath: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val target = File(projectDir, relativePath)
+            val target = SafePaths.resolveInside(projectDir, relativePath) ?: return@withContext false
             target.mkdirs()
         } catch (e: Exception) {
             false
@@ -66,7 +82,7 @@ class ProjectRepository(private val context: Context) {
 
     suspend fun deleteFile(projectDir: File, relativePath: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val target = File(projectDir, relativePath)
+            val target = SafePaths.resolveInside(projectDir, relativePath) ?: return@withContext false
             if (target.isDirectory) target.deleteRecursively() else target.delete()
         } catch (e: Exception) {
             false
@@ -104,18 +120,25 @@ class ProjectRepository(private val context: Context) {
         rootProjectsDir.listFiles()?.filter { it.isDirectory }?.toList() ?: emptyList()
     }
 
+    /**
+     * Reads the project's editable text files. Dependency and build output folders
+     * (node_modules, .git, dist, ...) and binary or very large files are skipped: after an
+     * `npm install` they would otherwise mean reading tens of thousands of files into memory.
+     */
     suspend fun readProjectFiles(projectDir: File): List<SourceFile> = withContext(Dispatchers.IO) {
         if (!projectDir.exists()) return@withContext emptyList()
         val list = mutableListOf<SourceFile>()
-        projectDir.walkTopDown().forEach { file ->
-            if (file.isFile && !file.name.startsWith(".")) {
-                val relative = file.relativeTo(projectDir).path
-                try {
-                    val content = file.readText()
-                    list.add(SourceFile(path = relative, content = content))
-                } catch (ignored: Exception) {}
+        projectDir.walkTopDown()
+            .onEnter { dir -> dir == projectDir || !isSkippedDirectory(dir) }
+            .forEach { file ->
+                if (file.isFile && !file.name.startsWith(".") && isEditableTextFile(file)) {
+                    val relative = file.relativeTo(projectDir).path
+                    try {
+                        val content = file.readText()
+                        list.add(SourceFile(path = relative, content = content))
+                    } catch (ignored: Exception) {}
+                }
             }
-        }
         list
     }
 
@@ -125,10 +148,21 @@ class ProjectRepository(private val context: Context) {
                 ?.filter { !it.name.startsWith(".") }
                 ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
                 ?.map { child ->
-                    if (child.isDirectory) {
+                    if (child.isDirectory && isSkippedDirectory(child)) {
+                        // Shown so the user can see it exists, but never walked.
+                        ProjectFileNode(
+                            name = child.name,
+                            relativePath = child.relativeTo(projectDir).path,
+                            isDirectory = true
+                        )
+                    } else if (child.isDirectory) {
                         buildTree(child)
                     } else {
-                        val lines = try { child.readLines().size } catch (_: Exception) { 0 }
+                        val lines = if (isEditableTextFile(child)) {
+                            try { child.useLines { it.count() } } catch (_: Exception) { 0 }
+                        } else {
+                            0
+                        }
                         ProjectFileNode(
                             name = child.name,
                             relativePath = child.relativeTo(projectDir).path,
@@ -180,32 +214,37 @@ class ProjectRepository(private val context: Context) {
             projectDir.mkdirs()
 
             val tempZip = File(context.cacheDir, "temp_import_${System.currentTimeMillis()}.zip")
-            tempZip.outputStream().use { out ->
-                inputStream.copyTo(out)
+            inputStream.use { input ->
+                tempZip.outputStream().use { out ->
+                    input.copyTo(out)
+                }
             }
 
-            java.util.zip.ZipInputStream(tempZip.inputStream()).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    val entryName = entry.name
-                    if (!entryName.startsWith("__MACOSX") && !entryName.contains("../")) {
-                        // Strip leading root directory if GitHub zipball format (e.g. repo-name-hash/file)
-                        val cleanPath = entryName.replaceFirst(Regex("^[^/]+/(?=.+)"), "")
-                        val targetFile = File(projectDir, if (cleanPath.isBlank()) entryName else cleanPath)
+            try {
+                ZipFile(tempZip).use { zip ->
+                    val entries = zip.entries().toList()
+                    // Strip the single wrapping folder of GitHub zipballs ("repo-abc123/..."),
+                    // but keep the layout of archives that have several top-level entries.
+                    val rootPrefix = SafePaths.commonRootFolder(entries.map { it.name })
+                    for (entry in entries) {
+                        val entryName = entry.name.replace('\\', '/')
+                        if (entryName.startsWith("__MACOSX")) continue
+                        val cleanPath = if (rootPrefix != null) entryName.removePrefix(rootPrefix) else entryName
+                        // Rejects "Zip Slip" entries such as "../../shared_prefs/x.xml".
+                        val targetFile = SafePaths.resolveInside(projectDir, cleanPath) ?: continue
                         if (entry.isDirectory) {
                             targetFile.mkdirs()
                         } else {
                             targetFile.parentFile?.mkdirs()
-                            targetFile.outputStream().use { fos ->
-                                zis.copyTo(fos)
+                            zip.getInputStream(entry).use { input ->
+                                targetFile.outputStream().use { fos -> input.copyTo(fos) }
                             }
                         }
                     }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
                 }
+            } finally {
+                tempZip.delete()
             }
-            tempZip.delete()
             Result.success(projectDir)
         } catch (e: Exception) {
             Result.failure(e)
@@ -215,7 +254,8 @@ class ProjectRepository(private val context: Context) {
     suspend fun cloneGitHubRepo(
         repoUrlOrSlug: String,
         branch: String? = null,
-        authToken: String? = null
+        authToken: String? = null,
+        takenNames: Collection<String> = emptyList()
     ): Result<Pair<File, String>> = withContext(Dispatchers.IO) {
         try {
             val cleaned = repoUrlOrSlug.trim()
@@ -232,7 +272,7 @@ class ProjectRepository(private val context: Context) {
 
             val owner = parts[0]
             val repo = parts[1]
-            val projectName = repo
+            val projectName = uniqueProjectName(repo, takenNames)
 
             val client = com.example.data.remote.ApiClient.createAiHttpClient(60)
             val branchParam = branch?.trim()?.ifEmpty { null }
@@ -251,17 +291,18 @@ class ProjectRepository(private val context: Context) {
                 requestBuilder.header("Authorization", "Bearer ${authToken.trim()}")
             }
 
-            val response = client.newCall(requestBuilder.build()).execute()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(
-                    Exception("Failed to download repository ($owner/$repo): HTTP ${response.code} ${response.message}")
-                )
+            val importResult = client.newCall(requestBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("Failed to download repository ($owner/$repo): HTTP ${response.code} ${response.message}")
+                    )
+                }
+
+                val bodyStream = response.body?.byteStream()
+                    ?: return@withContext Result.failure(Exception("Empty response received from GitHub"))
+
+                importProjectFromZipStream(bodyStream, projectName)
             }
-
-            val bodyStream = response.body?.byteStream()
-                ?: return@withContext Result.failure(Exception("Empty response received from GitHub"))
-
-            val importResult = importProjectFromZipStream(bodyStream, projectName)
             if (importResult.isSuccess) {
                 Result.success(Pair(importResult.getOrThrow(), projectName))
             } else {
@@ -270,5 +311,28 @@ class ProjectRepository(private val context: Context) {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun isSkippedDirectory(dir: File): Boolean = dir.name in SKIPPED_DIRECTORIES
+
+    private fun isEditableTextFile(file: File): Boolean {
+        if (file.length() > MAX_EDITABLE_FILE_BYTES) return false
+        return try {
+            val head = ByteArray(BINARY_SNIFF_BYTES)
+            val read = file.inputStream().use { it.read(head) }
+            (0 until maxOf(read, 0)).none { head[it] == 0.toByte() }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    companion object {
+        /** Dependency, VCS and build-output folders that are never loaded into the editor or AI context. */
+        val SKIPPED_DIRECTORIES = setOf(
+            "node_modules", ".git", ".gradle", ".kotlin", ".idea", ".next", ".nuxt", ".svelte-kit",
+            ".cache", "dist", "build", "coverage", "__pycache__", ".venv", "venv"
+        )
+        private const val MAX_EDITABLE_FILE_BYTES = 512L * 1024
+        private const val BINARY_SNIFF_BYTES = 8000
     }
 }

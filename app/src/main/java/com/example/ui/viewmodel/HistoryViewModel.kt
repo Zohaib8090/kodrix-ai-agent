@@ -10,6 +10,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.local.BuildRecord
 import com.example.data.local.PreferenceStorage
 import com.example.data.services.ProjectRepository
+import com.example.util.ProjectNaming
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,9 +50,20 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         val trimmed = newName.trim()
         if (trimmed.isBlank() || trimmed == record.appName) return
         viewModelScope.launch {
-            projectRepo.renameProject(record.appName, trimmed)
-            val updated = record.copy(appName = trimmed)
-            db.buildRecordDao().update(updated)
+            // Never let a rename land on another project's folder.
+            val sameFolder = ProjectNaming.toDirectoryName(trimmed)
+                .equals(ProjectNaming.toDirectoryName(record.appName), ignoreCase = true)
+            val finalName = if (sameFolder) {
+                trimmed
+            } else {
+                val otherNames = db.buildRecordDao().getAllAppNames().filter { it != record.appName }
+                projectRepo.uniqueProjectName(trimmed, otherNames)
+            }
+            if (projectRepo.renameProject(record.appName, finalName)) {
+                db.buildRecordDao().update(record.copy(appName = finalName))
+            } else {
+                _processError.value = "Could not rename project folder to '$finalName'."
+            }
         }
     }
 
@@ -97,7 +109,10 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
-                val projectName = extractedName ?: "imported_project_${System.currentTimeMillis() % 10000}"
+                val projectName = projectRepo.uniqueProjectName(
+                    extractedName ?: "imported_project",
+                    db.buildRecordDao().getAllAppNames()
+                )
 
                 val inputStream = context.contentResolver.openInputStream(uri)
                     ?: throw Exception("Could not open selected ZIP file")
@@ -154,7 +169,7 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
             try {
                 val token = customToken?.trim()?.ifEmpty { null } ?: prefs.githubToken.ifBlank { null }
-                val result = projectRepo.cloneGitHubRepo(trimmed, branch, token)
+                val result = projectRepo.cloneGitHubRepo(trimmed, branch, token, db.buildRecordDao().getAllAppNames())
 
                 if (result.isSuccess) {
                     val (projectDir, projectName) = result.getOrThrow()
