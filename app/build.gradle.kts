@@ -69,6 +69,8 @@ android {
     compose = true
     buildConfig = true
   }
+  // proot ships as lib*.so files and must be extracted to disk so Android lets us execute it.
+  packaging { jniLibs { useLegacyPackaging = true } }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
     includeInApk = false
@@ -141,6 +143,8 @@ dependencies {
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
+  testImplementation("org.json:json:20240303")
+  testImplementation("com.squareup.okhttp3:mockwebserver:4.10.0")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)
