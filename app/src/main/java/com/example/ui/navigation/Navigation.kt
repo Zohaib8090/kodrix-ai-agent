@@ -27,6 +27,8 @@ object Routes {
     const val TRACKER = "tracker/{buildId}"
     const val HISTORY = "history"
     const val SETTINGS = "settings"
+    const val CHAT = "chat"
+    const val AGENT_SETTINGS = "agent_settings"
 
     fun workspace(projectId: String) = "workspace/$projectId"
     fun tracker(buildId: String) = "workspace/$buildId"
@@ -48,13 +50,13 @@ fun AppNavigation(
             OnboardingScreen(
                 viewModel = vm,
                 onFinishOnboarding = {
-                    navController.navigate(Routes.DASHBOARD) {
+                    navController.navigate(Routes.CHAT) {
                         popUpTo(Routes.ONBOARDING) { inclusive = true }
                     }
                 },
                 onNavigateBack = {
                     if (!navController.popBackStack()) {
-                        navController.navigate(Routes.DASHBOARD)
+                        navController.navigate(Routes.CHAT)
                     }
                 }
             )
@@ -74,6 +76,21 @@ fun AppNavigation(
                     navController.navigate(Routes.SETTINGS)
                 }
             )
+        }
+
+        composable(Routes.CHAT) {
+            val vm: com.example.ui.viewmodel.ChatViewModel = viewModel()
+            com.example.ui.screens.ChatScreen(
+                viewModel = vm,
+                onNavigateToBuild = { navController.navigate(Routes.DASHBOARD) },
+                onNavigateToHistory = { navController.navigate(Routes.HISTORY) },
+                onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
+                onNavigateToAgentSettings = { navController.navigate(Routes.AGENT_SETTINGS) },
+            )
+        }
+
+        composable(Routes.AGENT_SETTINGS) {
+            com.example.ui.screens.AgentSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
 
         composable(Routes.SETTINGS) {

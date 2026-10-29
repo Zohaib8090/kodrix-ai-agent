@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         NotificationHelper.createNotificationChannel(applicationContext)
-        val startDest = Routes.DASHBOARD
+        val startDest = Routes.CHAT
 
         setContent {
             // By default, the app only asks for notification permission so the user

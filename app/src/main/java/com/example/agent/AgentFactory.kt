@@ -15,7 +15,6 @@ import com.example.agent.tools.OpenUrlTool
 import com.example.agent.tools.SetAlarmTool
 import com.example.data.model.AuthStyle
 import com.example.data.model.ProviderConfig
-import com.example.linux.LinuxEnvironment
 import org.json.JSONObject
 import java.io.File
 
@@ -62,6 +61,8 @@ Rules:
         context: Context,
         confirm: suspend (toolName: String, argsJson: String) -> Boolean,
         onEvent: (AgentEvent) -> Unit,
+        quietShell: Boolean = false,
+        extraPrompt: String = "",
     ): BuiltAgent {
         val app = context.applicationContext as MyApplication
         val config = AgentConfig(context)
@@ -78,12 +79,11 @@ Rules:
         registry.register(OpenUrlTool(context))
         registry.register(DialTool(context))
         registry.register(DraftSmsTool(context))
+        registry.register(com.example.agent.tools.WebSearchTool())
+        registry.register(com.example.agent.tools.WebFetchTool())
 
-        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull { it == "arm64-v8a" || it == "x86_64" } ?: ""
-        val linux = LinuxEnvironment(
-            context.filesDir, File(context.applicationInfo.nativeLibraryDir), abi,
-        ) { path -> context.assets.open(path) }
-        if (linux.isSupported) registry.register(LinuxShellTool(linux))
+        val linux = com.example.linux.LinuxProvider.get(context)
+        if (linux.isSupported) registry.register(LinuxShellTool(linux, requireConfirm = !quietShell))
 
         val memory = MemoryStore(File(context.filesDir, "agent_memory"))
         registry.register(MemoryTool(memory))
@@ -98,7 +98,7 @@ Rules:
         }
 
         val index = memory.index()
-        val prompt = SYSTEM_PROMPT + if (index.isBlank()) "\n\nMemory is empty." else "\n\nMemory files:\n$index"
+        val prompt = SYSTEM_PROMPT + extraPrompt + if (index.isBlank()) "\n\nMemory is empty." else "\n\nMemory files:\n$index"
         return BuiltAgent(AgentLoop(tiers, registry, prompt, confirm, onEvent), notes)
     }
 }

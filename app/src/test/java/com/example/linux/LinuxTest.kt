@@ -322,3 +322,29 @@ class ProcessTreeTest {
         tmpDir.deleteRecursively()
     }
 }
+
+class PackageCommandTest {
+    @org.junit.Test fun pkgInstallBecomesApkAdd() {
+        assertEquals("apk add --no-cache nodejs git", translatePackageCommand("pkg install -y nodejs git"))
+        assertEquals("apk add --no-cache nodejs", translatePackageCommand("apt-get install -y nodejs-lts"))
+    }
+    @org.junit.Test fun updateAndRemoveAndPassThrough() {
+        assertEquals("apk update && apk upgrade", translatePackageCommand("pkg update"))
+        assertEquals("apk del git", translatePackageCommand("apt remove git"))
+        assertEquals("ls -la", translatePackageCommand("ls -la"))
+        assertEquals("pkg install", translatePackageCommand("pkg install"))
+    }
+}
+
+class BindMountTest {
+    @org.junit.Test fun projectFolderIsBoundIntoTheGuest() {
+        val tmp = java.nio.file.Files.createTempDirectory("b").toFile()
+        val e = LinuxEnvironment(tmp, File(tmp, "n"), "x86_64", fs = JvmFsOps) { "x".byteInputStream() }
+        val (argv, _) = e.buildCommand("ls", "/work", listOf("/data/proj" to "/work"))
+        val i = argv.indexOf("/data/proj:/work")
+        assertTrue(i > 0 && argv[i - 1] == "-b")
+        assertEquals("/work", argv[argv.indexOf("-w") + 1])
+        assertTrue("binds must come before the command", i < argv.indexOf("/usr/bin/env"))
+        tmp.deleteRecursively()
+    }
+}

@@ -2257,9 +2257,9 @@ private fun TerminalTab(
     }
 
     val quickCommands = listOf(
-        "Initialize Embedded Linux" to "setup-termux",
-        "Install Node Engine" to "setup-node",
-        "pkg install nodejs" to "pkg install -y nodejs git",
+        "Initialize Linux" to "setup-linux",
+        "Install Node + Git" to "setup-node",
+        "apk add python3" to "apk add python3",
         "ls -la" to "ls -la",
         "npm install" to "npm install",
         "npm run dev" to "npm run dev",

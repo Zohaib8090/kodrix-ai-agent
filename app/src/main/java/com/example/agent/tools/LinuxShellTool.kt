@@ -7,14 +7,15 @@ import com.example.linux.LinuxEnvironment
 import com.example.linux.LinuxException
 import org.json.JSONObject
 
-/** Runs shell commands in the app's private Alpine Linux. Always needs the user's approval. */
-class LinuxShellTool(private val linux: LinuxEnvironment) : Tool {
+/** Runs shell commands in the app's private Alpine Linux. Asks for approval unless [requireConfirm] is false. */
+class LinuxShellTool(private val linux: LinuxEnvironment, requireConfirm: Boolean = true) : Tool {
     override val name = "linux_shell"
     override val description =
         "Run a shell command in a private Alpine Linux environment inside this app (not the phone's own system). " +
             "It has busybox tools; install more with 'apk add <package>' (python3, git, curl, nodejs...). " +
             "Files under /root persist between calls. Each call has a time limit (default 60 s, max 300 s)."
-    override val risk = Risk.CONFIRM
+    // The shell only touches the app's private Alpine, so chat can run it silently; the power-button assistant still asks.
+    override val risk = if (requireConfirm) Risk.CONFIRM else Risk.SAFE
     override val parameters = JSONObject(
         """{"type":"object","properties":{
              "command":{"type":"string","description":"Shell command, run with /bin/sh -c"},

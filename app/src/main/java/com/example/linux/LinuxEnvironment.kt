@@ -110,7 +110,12 @@ class LinuxEnvironment(
     }
 
     /** The exact command line and environment used to run [command] in the guest. Pure, so it is unit-tested. */
-    fun buildCommand(command: String, workDir: String = "/root"): Pair<List<String>, Map<String, String>> {
+    fun buildCommand(
+        command: String,
+        workDir: String = "/root",
+        binds: List<Pair<String, String>> = emptyList(),
+    ): Pair<List<String>, Map<String, String>> {
+        val bindArgs = binds.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
         val argv = listOf(
             proot.absolutePath,
             "-r", rootfs.absolutePath,
@@ -118,6 +123,7 @@ class LinuxEnvironment(
             "--link2symlink",        // hard links are not allowed in app storage
             "--kill-on-exit",
             "-b", "/dev", "-b", "/proc", "-b", "/sys",
+        ) + bindArgs + listOf(
             "-w", workDir,
             "/usr/bin/env", "-i",
             "HOME=/root", "USER=root", "TERM=xterm-256color", "LANG=C.UTF-8", "TMPDIR=/tmp",
@@ -138,10 +144,11 @@ class LinuxEnvironment(
         timeoutSeconds: Long = 60,
         maxOutputChars: Int = 12_000,
         workDir: String = "/root",
+        binds: List<Pair<String, String>> = emptyList(),
     ): ExecResult = withContext(Dispatchers.IO) {
         if (!isInstalled) throw LinuxException("Linux is not installed yet.")
         prepareRuntime()
-        val (argv, env) = buildCommand(command, workDir)
+        val (argv, env) = buildCommand(command, workDir, binds)
         val pb = ProcessBuilder(argv).redirectErrorStream(true)
         pb.environment().putAll(env)
         val proc = pb.start()

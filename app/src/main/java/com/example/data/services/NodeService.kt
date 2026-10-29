@@ -322,15 +322,14 @@ class RealTerminalSession(
     var currentDir: File = File(context.filesDir, "my_projects").apply { mkdirs() },
     private val nodeService: NodeService? = null
 ) {
-    private val embeddedTermux = EmbeddedTermuxManager(context)
+    private val linux = com.example.linux.LinuxProvider.get(context)
 
     private val _outputLines = MutableStateFlow<List<String>>(
         listOf(
-            "Kodrix Linux/Termux Environment v2.0",
-            "Built-in Tools: bash, sh, npm, node, git, pkg, apt, curl, wget, unzip",
-            if (embeddedTermux.isInstalled) "Embedded Termux Linux: ACTIVE (${embeddedTermux.getArchitecture()})"
-            else if (nodeService?.isRealNodeInstalled == true) "Real Native Engine: ACTIVE (ARM64)"
-            else "Type 'setup-termux' or 'setup-node' to initialize full embedded Linux rootfs",
+            "Kodrix Linux Environment v3.0 (Alpine, no root needed)",
+            if (linux.isInstalled) "Linux: READY. Your project is at /work. Use 'apk add <pkg>' or 'pkg install <pkg>'."
+            else if (linux.isSupported) "Type 'setup-linux' to install Alpine Linux (about 3 MB download), then 'setup-node' for Node.js."
+            else "Linux is not available on this phone's CPU.",
             "Working Dir: ${currentDir.name}",
             "------------------------------------------------"
         )
@@ -341,6 +340,8 @@ class RealTerminalSession(
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
     private var process: Process? = null
+
+    private fun translatePackageCommand(command: String) = com.example.linux.translatePackageCommand(command)
 
     init {
         nodeService?.setupRealEnv()
@@ -357,49 +358,63 @@ class RealTerminalSession(
                 val tokens = trimmed.split("\\s+".toRegex()).filter { it.isNotBlank() }
                 val cmd = tokens.firstOrNull()?.lowercase() ?: ""
 
-                // 1. Check for setup-termux or setup-node installer commands
-                if (cmd == "setup-termux" || cmd == "install-termux") {
-                    appendOutput(">> Initializing Embedded Termux Linux Rootfs (${embeddedTermux.getArchitecture()})...")
-                    val success = embeddedTermux.installBootstrap(
-                        onLog = { appendOutput(it) },
-                        onProgress = { p -> if (p > 0) appendOutput(">> Progress: ${(p * 100).toInt()}%") }
-                    )
-                    if (success) {
-                        appendOutput("✓ Full Embedded Termux Linux environment is ACTIVE!")
-                        appendOutput("You can now run 'pkg install <pkg>', 'bash', 'node', 'npm', 'git', etc.")
-                    } else {
-                        appendOutput("⚠️ Setup failed. Check internet connection and try again.")
+                // 1. Installers. All of them set up the proot Alpine Linux (the old Termux method is blocked by Android).
+                val wantsInstall = cmd in setOf("setup-termux", "install-termux", "setup-linux", "install-linux", "setup-node", "install-node")
+                if (wantsInstall) {
+                    if (!linux.isSupported) {
+                        appendOutput("⚠️ Linux is not available on this phone's CPU (needs arm64 or x86_64).")
+                        _isRunning.value = false; onComplete?.invoke(1); return@launch
+                    }
+                    var ok = true
+                    try {
+                        if (!linux.isInstalled) {
+                            appendOutput(">> Installing Alpine Linux…")
+                            val summary = linux.install { appendOutput(">> $it") }
+                            appendOutput("✓ $summary")
+                        } else appendOutput("✓ Alpine Linux is already installed.")
+                        if (cmd.endsWith("node")) {
+                            appendOutput(">> Installing Node.js, npm and git (needs internet)…")
+                            val r = linux.exec("apk add --no-cache nodejs npm git 2>&1", timeoutSeconds = 600)
+                            r.output.lines().filter { it.isNotBlank() }.takeLast(6).forEach { appendOutput(it) }
+                            ok = r.exitCode == 0
+                            if (ok) appendOutput("✓ Node.js, npm and git are ready.")
+                        } else {
+                            appendOutput("✓ Linux is ready. Try: ls, apk add git, or setup-node.")
+                        }
+                    } catch (e: Exception) {
+                        ok = false
+                        appendOutput("⚠️ Setup failed: ${e.message}")
+                        appendOutput("Check your internet connection and try again.")
                     }
                     _isRunning.value = false
-                    onComplete?.invoke(if (success) 0 else 1)
+                    onComplete?.invoke(if (ok) 0 else 1)
                     return@launch
                 }
 
-                if (cmd == "setup-node" || cmd == "install-node") {
-                    appendOutput(">> Starting Real Native Node.js Installer...")
-                    val success = nodeService?.downloadAndInstallRealNode { appendOutput(it) } ?: false
-                    if (success) {
-                        appendOutput("✓ Real native Node.js engine installed successfully!")
-                        appendOutput("You can now run real 'node', 'npm install', 'git clone', etc.")
-                    } else {
-                        appendOutput("⚠️ Installation failed. Check internet connection and try again.")
+                // 2. Once Linux is installed, every other command runs inside it.
+                if (linux.isInstalled && cmd !in setOf("clear", "cls", "help", "cd")) {
+                    val translated = translatePackageCommand(trimmed)
+                    val projectBind = currentDir.absolutePath to "/work"
+                    val long = cmd in setOf("apk", "pkg", "apt", "apt-get", "npm", "npx", "git", "pip", "pip3", "yarn", "pnpm")
+                    try {
+                        val r = linux.exec(translated, timeoutSeconds = if (long) 600 else 120, workDir = "/work", binds = listOf(projectBind))
+                        r.output.lines().forEach { appendOutput(it) }
+                        if (r.timedOut) appendOutput("[Timed out and stopped]")
+                        else if (r.exitCode != 0) appendOutput("[Exit code ${r.exitCode}]")
+                        _isRunning.value = false
+                        onComplete?.invoke(if (r.timedOut) -1 else r.exitCode)
+                    } catch (e: Exception) {
+                        appendOutput("Linux error: ${e.message}")
+                        _isRunning.value = false
+                        onComplete?.invoke(-1)
                     }
-                    _isRunning.value = false
-                    onComplete?.invoke(if (success) 0 else 1)
                     return@launch
                 }
 
-                // 2. If Embedded Termux or Real Node.js binary is installed, execute real OS process
-                val realNode = nodeService?.getRealNodeBinary()
-                if (embeddedTermux.isInstalled || realNode != null || cmd == "pkg" || cmd == "apt" || cmd == "apt-get" || cmd == "bash" || cmd == "sh" || cmd == "dpkg") {
-                    val exit = embeddedTermux.execute(trimmed, currentDir) { line ->
-                        appendOutput(line)
-                    }
-                    if (exit != 0) {
-                        appendOutput("[Exit code $exit]")
-                    }
+                if (!linux.isInstalled && cmd in setOf("pkg", "apt", "apt-get", "apk", "bash", "sh", "dpkg")) {
+                    appendOutput("Linux is not installed yet. Type 'setup-linux' first.")
                     _isRunning.value = false
-                    onComplete?.invoke(exit)
+                    onComplete?.invoke(1)
                     return@launch
                 }
 
