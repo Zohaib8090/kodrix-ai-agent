@@ -11,6 +11,8 @@ data class ChatMessage(
     val content: String? = null,
     val toolCalls: List<ToolCall> = emptyList(),
     val toolCallId: String? = null,
+    /** Attached pictures as data URLs (video is sent as a few frames). Only used on user messages. */
+    val images: List<String> = emptyList(),
 )
 
 /** What a model returned for one request: text, tool calls, or both. */
@@ -29,6 +31,9 @@ interface Tool {
     /** JSON Schema object describing the arguments. */
     val parameters: JSONObject
     val risk: Risk get() = Risk.SAFE
+
+    /** Risk of one specific call. Defaults to [risk]; a tool can override it to gate only its destructive arguments. */
+    fun riskFor(args: JSONObject): Risk = risk
     suspend fun run(args: JSONObject): ToolResult
 }
 

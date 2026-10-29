@@ -32,7 +32,8 @@ Rules:
 - Only call tools that exist. Do not invent tool names or arguments.
 - For anything irreversible or risky, the system asks the user to confirm. If the user declines, stop and do not retry.
 - Check your memory at the start of a task when it could help, and save durable facts and preferences the user tells you.
-- Never reveal API keys or other secrets."""
+- Never reveal API keys or other secrets.
+- For research or anything current (news, prices, versions, "latest"), do not answer from memory: search several ways, open 3 to 5 of the best pages (web_fetch, or web_browse when a page needs JavaScript), compare them, and say which source each claim came from. Say so when sources disagree or you could not verify something."""
 
     /** Picks the model tiers (cheapest first) from the providers the user already configured. */
     internal fun tiersFrom(providers: List<ProviderConfig>, strongModel: String): List<LlmClient> {
@@ -81,6 +82,7 @@ Rules:
         registry.register(DraftSmsTool(context))
         registry.register(com.example.agent.tools.WebSearchTool())
         registry.register(com.example.agent.tools.WebFetchTool())
+        registry.register(com.example.agent.tools.WebBrowseTool(context))
 
         val linux = com.example.linux.LinuxProvider.get(context)
         if (linux.isSupported) registry.register(LinuxShellTool(linux, requireConfirm = !quietShell))
@@ -99,6 +101,8 @@ Rules:
 
         val index = memory.index()
         val prompt = SYSTEM_PROMPT + extraPrompt + if (index.isBlank()) "\n\nMemory is empty." else "\n\nMemory files:\n$index"
-        return BuiltAgent(AgentLoop(tiers, registry, prompt, confirm, onEvent), notes)
+        // Bypass mode answers "yes" to every confirmation. It is read on each call, so the switch works mid-chat.
+        val gate: suspend (String, String) -> Boolean = { tool, args -> AgentConfig(context).bypassPermissions || confirm(tool, args) }
+        return BuiltAgent(AgentLoop(tiers, registry, prompt, gate, onEvent), notes)
     }
 }

@@ -38,6 +38,7 @@ fun ChatScreen(
     onNavigateToHistory: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToAgentSettings: () -> Unit,
+    onNavigateToMemory: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -116,6 +117,8 @@ fun ChatScreen(
                     onClick = { go(onNavigateToBuild) }, modifier = Modifier.padding(pad).testTag("drawer_build"))
                 NavigationDrawerItem(icon = { Icon(Icons.Default.Folder, null) }, label = { Text("Projects") }, selected = false,
                     onClick = { go(onNavigateToHistory) }, modifier = Modifier.padding(pad))
+                NavigationDrawerItem(icon = { Icon(Icons.Default.Psychology, null) }, label = { Text("Memory") }, selected = false,
+                    onClick = { go(onNavigateToMemory) }, modifier = Modifier.padding(pad).testTag("drawer_memory"))
                 NavigationDrawerItem(icon = { Icon(Icons.Default.Hub, null) }, label = { Text("Connectors & agent") }, selected = false,
                     onClick = { go(onNavigateToAgentSettings) }, modifier = Modifier.padding(pad).testTag("drawer_agent"))
                 NavigationDrawerItem(icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Settings") }, selected = false,
@@ -154,6 +157,10 @@ fun ChatScreen(
                         contentPadding = PaddingValues(vertical = 12.dp),
                     ) {
                         items(lines) { line ->
+                            if (line.note) {
+                                Text("🧠 ${line.text}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+                                return@items
+                            }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = if (line.fromUser) Arrangement.End else Arrangement.Start) {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
@@ -176,6 +183,9 @@ fun ChatScreen(
                             }
                         }
                     }
+                }
+                if (AgentConfig(context).bypassPermissions) {
+                    Text("Bypass permissions is ON: actions run without asking.", Modifier.fillMaxWidth().padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
                 voiceNote?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {

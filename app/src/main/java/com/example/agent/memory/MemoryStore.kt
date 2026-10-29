@@ -10,6 +10,8 @@ import java.net.URLDecoder
 
 class MemoryException(message: String) : Exception(message)
 
+private const val TRASH = ".trash"
+
 /**
  * File-based agent memory, command-compatible with Anthropic's client-side memory tool
  * (view / create / str_replace / insert / delete / rename under /memories).
@@ -22,6 +24,18 @@ class MemoryStore(private val root: File, private val maxFileBytes: Int = 64 * 1
     }
 
     private val canonicalRoot: File = root.canonicalFile
+    private val trashDir: File get() = File(canonicalRoot, TRASH).also { it.mkdirs() }
+
+    /** True for the recycle bin and anything else under a dot-folder; those are never shown to the model. */
+    private fun hidden(f: File): Boolean =
+        f.relativeTo(canonicalRoot).path.split(File.separatorChar).any { it.startsWith(".") }
+
+    /** Copies [f] into the recycle bin before it is overwritten or shortened, so nothing is lost silently. */
+    private fun snapshot(f: File) {
+        if (!f.isFile || hidden(f)) return
+        val rel = f.relativeTo(canonicalRoot).path.replace(File.separatorChar, '~')
+        f.copyTo(File(trashDir, "${System.currentTimeMillis()}__$rel"), overwrite = true)
+    }
 
     /** Maps a model-supplied "/memories/..." path to a real file inside [root], or throws. */
     fun resolve(path: String): File {
@@ -63,7 +77,7 @@ class MemoryStore(private val root: File, private val maxFileBytes: Int = 64 * 1
         if (!f.exists()) throw MemoryException("The path $path does not exist.")
         if (f.isDirectory) {
             val sb = StringBuilder("Directory listing of $path (2 levels):\n")
-            f.walkTopDown().maxDepth(2).filter { it != f && !it.name.startsWith(".") }.sortedBy { it.path }.forEach {
+            f.walkTopDown().maxDepth(2).filter { it != f && !hidden(it) }.sortedBy { it.path }.forEach {
                 val rel = it.relativeTo(canonicalRoot).path.replace(File.separatorChar, '/')
                 sb.append(if (it.isDirectory) "-\t/memories/$rel/\n" else "${it.length()}\t/memories/$rel\n")
             }
@@ -83,6 +97,8 @@ class MemoryStore(private val root: File, private val maxFileBytes: Int = 64 * 1
         val f = resolve(path)
         if (f == canonicalRoot || f.isDirectory) throw MemoryException("$path is a directory")
         f.parentFile?.mkdirs()
+        if (hidden(f)) throw MemoryException("That location is reserved.")
+        snapshot(f)
         f.writeText(text)
         return "File created successfully at: $path"
     }
@@ -98,6 +114,7 @@ class MemoryStore(private val root: File, private val maxFileBytes: Int = 64 * 1
         }
         val updated = content.replaceFirst(oldStr, newStr)
         if (updated.toByteArray().size > maxFileBytes) throw MemoryException("File would exceed $maxFileBytes bytes")
+        snapshot(f)
         f.writeText(updated)
         return "The memory file has been edited."
     }
@@ -117,8 +134,11 @@ class MemoryStore(private val root: File, private val maxFileBytes: Int = 64 * 1
         val f = resolve(path)
         if (f == canonicalRoot) throw MemoryException("Cannot delete the /memories root")
         if (!f.exists()) throw MemoryException("The path $path does not exist.")
+        if (hidden(f)) throw MemoryException("That location is reserved.")
+        // Soft delete: moves to the recycle bin where the user can restore it from the Memory screen.
+        if (f.isDirectory) f.walkTopDown().filter { it.isFile }.toList().forEach { snapshot(it) } else snapshot(f)
         f.deleteRecursively()
-        return "Successfully deleted $path"
+        return "Moved $path to the recycle bin (the user can restore it)."
     }
 
     fun rename(oldPath: String, newPath: String): String {
@@ -132,10 +152,41 @@ class MemoryStore(private val root: File, private val maxFileBytes: Int = 64 * 1
         return "Successfully renamed $oldPath to $newPath"
     }
 
+    data class Entry(val path: String, val bytes: Long, val modified: Long)
+
+    /** Every visible memory file, newest first. For the Memory screen. */
+    fun entries(): List<Entry> = canonicalRoot.walkTopDown().filter { it.isFile && !hidden(it) }
+        .map { Entry("/memories/" + it.relativeTo(canonicalRoot).path.replace(File.separatorChar, '/'), it.length(), it.lastModified()) }
+        .sortedByDescending { it.modified }.toList()
+
+    fun read(path: String): String = fileOnly(path).readText()
+
+    /** A user edit from the Memory screen. Keeps a backup of the previous text. */
+    fun write(path: String, text: String) { create(path, text) }
+
+    /** Deleted or overwritten files, newest first. */
+    fun trash(): List<Entry> = (trashDir.listFiles()?.filter { it.isFile } ?: emptyList())
+        .map { Entry(it.name, it.length(), it.lastModified()) }.sortedByDescending { it.modified }
+
+    /** Puts a recycle-bin file back at its original path (or a ".restored" sibling if that path is taken). */
+    fun restore(trashName: String): String {
+        val src = File(trashDir, trashName)
+        if (src.parentFile?.canonicalFile != trashDir.canonicalFile || !src.isFile) throw MemoryException("Not in the recycle bin.")
+        val rel = trashName.substringAfter("__").replace('~', File.separatorChar)
+        var dest = File(canonicalRoot, rel)
+        if (dest.exists()) dest = File(canonicalRoot, "$rel.restored")
+        dest.parentFile?.mkdirs()
+        src.copyTo(dest, overwrite = false)
+        src.delete()
+        return "/memories/" + dest.relativeTo(canonicalRoot).path.replace(File.separatorChar, '/')
+    }
+
+    fun emptyTrash() { trashDir.listFiles()?.forEach { it.delete() } }
+
     /** Short digest of what is stored, used to prime the system prompt at session start. */
     fun index(maxChars: Int = 3000): String {
         val sb = StringBuilder()
-        canonicalRoot.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.sortedBy { it.path }.forEach {
+        canonicalRoot.walkTopDown().filter { it.isFile && !hidden(it) }.sortedBy { it.path }.forEach {
             val rel = it.relativeTo(canonicalRoot).path.replace(File.separatorChar, '/')
             sb.append("/memories/$rel (${it.length()} bytes)\n")
         }
@@ -166,6 +217,19 @@ class MemoryTool(private val store: MemoryStore) : Tool {
         },"required":["command"]}
         """.trimIndent()
     )
+
+    /**
+     * Reading, adding and appending are free. Anything that removes information asks first:
+     * deleting, overwriting an existing file, or an edit that makes the text shorter.
+     */
+    override fun riskFor(args: JSONObject): Risk = when (args.optString("command")) {
+        "delete" -> Risk.CONFIRM
+        "create" -> if (exists(args.optString("path"))) Risk.CONFIRM else Risk.SAFE
+        "str_replace" -> if (args.optString("new_str").length < args.optString("old_str").length) Risk.CONFIRM else Risk.SAFE
+        else -> Risk.SAFE
+    }
+
+    private fun exists(path: String) = try { store.resolve(path).exists() } catch (_: MemoryException) { false }
 
     override suspend fun run(args: JSONObject): ToolResult = try {
         val out = when (val cmd = args.optString("command")) {

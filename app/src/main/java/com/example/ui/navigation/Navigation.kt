@@ -29,6 +29,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val CHAT = "chat"
     const val AGENT_SETTINGS = "agent_settings"
+    const val MEMORY = "memory"
 
     fun workspace(projectId: String) = "workspace/$projectId"
     fun tracker(buildId: String) = "workspace/$buildId"
@@ -86,7 +87,12 @@ fun AppNavigation(
                 onNavigateToHistory = { navController.navigate(Routes.HISTORY) },
                 onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
                 onNavigateToAgentSettings = { navController.navigate(Routes.AGENT_SETTINGS) },
+                onNavigateToMemory = { navController.navigate(Routes.MEMORY) },
             )
+        }
+
+        composable(Routes.MEMORY) {
+            com.example.ui.screens.MemoryScreen(onNavigateBack = { navController.popBackStack() })
         }
 
         composable(Routes.AGENT_SETTINGS) {

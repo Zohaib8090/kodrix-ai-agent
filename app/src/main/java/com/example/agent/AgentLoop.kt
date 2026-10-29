@@ -39,11 +39,11 @@ class AgentLoop(
         require(tiers.isNotEmpty()) { "At least one model tier is required" }
     }
 
-    suspend fun run(userText: String, history: List<ChatMessage> = emptyList()): AgentResult {
+    suspend fun run(userText: String, history: List<ChatMessage> = emptyList(), images: List<String> = emptyList()): AgentResult {
         val messages = mutableListOf<ChatMessage>()
         messages += ChatMessage("system", systemPrompt)
         messages += history.filter { it.role != "system" }
-        messages += ChatMessage("user", userText)
+        messages += ChatMessage("user", userText, images = images)
 
         var tier = 0
         var consecutiveToolFailures = 0
@@ -125,7 +125,7 @@ class AgentLoop(
         } catch (e: Exception) {
             return ToolResult("Arguments for ${call.name} were not valid JSON: ${e.message}", isError = true)
         }
-        if (tool.risk == Risk.CONFIRM) {
+        if (tool.riskFor(args) == Risk.CONFIRM) {
             val approved = try {
                 confirm(call.name, call.argumentsJson)
             } catch (e: Exception) {

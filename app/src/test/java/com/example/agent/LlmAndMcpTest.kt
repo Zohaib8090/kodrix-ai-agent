@@ -126,4 +126,17 @@ class LlmAndMcpTest {
         assertEquals("a_b_c", McpTool.sanitize("a.b c"))
         assertEquals(64, McpTool.sanitize("x".repeat(100)).length)
     }
+
+    @Test
+    fun userMessageWithPicturesUsesContentParts() {
+        val body = llm().buildBody(listOf(ChatMessage("user", "what is this?", images = listOf("data:image/jpeg;base64,AAA"))), emptyList())
+        val c = body.getJSONArray("messages").getJSONObject(0).getJSONArray("content")
+        assertEquals("text", c.getJSONObject(0).getString("type"))
+        assertEquals("what is this?", c.getJSONObject(0).getString("text"))
+        assertEquals("image_url", c.getJSONObject(1).getString("type"))
+        assertEquals("data:image/jpeg;base64,AAA", c.getJSONObject(1).getJSONObject("image_url").getString("url"))
+        val plain = llm().buildBody(listOf(ChatMessage("user", "hi")), emptyList()).getJSONArray("messages").getJSONObject(0)
+        assertEquals("hi", plain.getString("content"))
+    }
 }
+

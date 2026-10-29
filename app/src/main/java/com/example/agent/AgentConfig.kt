@@ -24,6 +24,11 @@ class AgentConfig(context: Context) {
         get() = prefs.getBoolean("speak_replies", true)
         set(v) = prefs.edit().putBoolean("speak_replies", v).apply()
 
+    /** When on, risky actions run without asking. Off by default. */
+    var bypassPermissions: Boolean
+        get() = prefs.getBoolean("bypass_permissions", false)
+        set(v) = prefs.edit().putBoolean("bypass_permissions", v).apply()
+
     var mcpServers: List<McpServerConfig>
         get() = parseServers(prefs.getString("mcp_servers", "[]") ?: "[]")
         set(v) = prefs.edit().putString("mcp_servers", serializeServers(v)).apply()

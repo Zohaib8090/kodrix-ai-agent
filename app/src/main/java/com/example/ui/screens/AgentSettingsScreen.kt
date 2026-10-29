@@ -26,10 +26,22 @@ fun AgentSettingsScreen(onNavigateBack: () -> Unit) {
     var strong by remember { mutableStateOf(config.strongModel) }
     var lang by remember { mutableStateOf(config.voiceLanguage) }
     var speak by remember { mutableStateOf(config.speakReplies) }
+    var bypass by remember { mutableStateOf(config.bypassPermissions) }
+    var showBypassWarning by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+
+    if (showBypassWarning) {
+        AlertDialog(
+            onDismissRequest = { showBypassWarning = false },
+            title = { Text("Turn on bypass permissions?") },
+            text = { Text("Kodrix will run risky actions without asking: deleting or overwriting memory, sending or deleting through your connectors, and phone actions. A wrong guess by the AI can cause real changes. Memory deletions still go to the recycle bin.") },
+            confirmButton = { TextButton(onClick = { bypass = true; config.bypassPermissions = true; showBypassWarning = false }) { Text("Turn on") } },
+            dismissButton = { TextButton(onClick = { showBypassWarning = false }) { Text("Cancel") } },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -40,6 +52,16 @@ fun AgentSettingsScreen(onNavigateBack: () -> Unit) {
         },
     ) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item { Text("Permissions", style = MaterialTheme.typography.titleMedium) }
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Bypass permissions")
+                        Text("Off: Kodrix asks before risky actions. On: it never asks.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = bypass, onCheckedChange = { if (it) showBypassWarning = true else { bypass = false; config.bypassPermissions = false } }, modifier = Modifier.testTag("bypass_switch"))
+                }
+            }
             item { Text("Models", style = MaterialTheme.typography.titleMedium) }
             item {
                 OutlinedTextField(

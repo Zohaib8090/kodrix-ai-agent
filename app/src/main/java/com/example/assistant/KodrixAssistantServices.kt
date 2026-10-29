@@ -28,7 +28,12 @@ class KodrixSession(context: Context) : VoiceInteractionSession(context) {
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
         Log.i("KodrixAssistant", "session shown, flags=$showFlags")
+        ScreenContext.screenshot.value = null
         val intent = Intent(context, AssistActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startAssistantActivity(intent)
+    }
+
+    override fun onHandleScreenshot(screenshot: android.graphics.Bitmap?) {
+        ScreenContext.screenshot.value = screenshot
     }
 }

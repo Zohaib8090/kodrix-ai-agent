@@ -15,7 +15,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-data class ChatLine(val fromUser: Boolean, val text: String, val isError: Boolean = false)
+data class ChatLine(val fromUser: Boolean, val text: String, val isError: Boolean = false, val note: Boolean = false)
 
 data class PendingApproval(val tool: String, val args: String, val answer: CompletableDeferred<Boolean>)
 
@@ -25,6 +25,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     var thinking by mutableStateOf(false); private set
     var pending by mutableStateOf<PendingApproval?>(null); private set
 
+    private var pendingMemory: String? = null
     private var agent: BuiltAgent? = null
     private val history = mutableListOf<ChatMessage>()
     private var job: Job? = null
@@ -48,7 +49,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         pending = null
                         ok
                     },
-                    onEvent = {},
+                    onEvent = { e ->
+                        // Show what the agent writes to memory, so nothing is saved invisibly.
+                        if (e is com.example.agent.AgentEvent.ToolStart && e.name == "memory") pendingMemory = memoryNote(e.args)
+                        if (e is com.example.agent.AgentEvent.ToolEnd && e.name == "memory") {
+                            pendingMemory?.let { if (!e.result.isError) lines += ChatLine(false, it, note = true) }
+                            pendingMemory = null
+                        }
+                    },
                     quietShell = true,
                     extraPrompt = "\n- You are in a text chat. Do terminal and tool work silently; reply with the result in plain language and do not describe commands or tool names unless the user asks. You may use Markdown sparingly.",
                 ).also { agent = it }
@@ -77,4 +85,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Used when the agent settings changed (new key/model). */
     fun resetAgent() { agent = null }
+
+    private fun memoryNote(argsJson: String): String? = try {
+        val o = org.json.JSONObject(argsJson)
+        val path = o.optString("path").ifBlank { o.optString("old_path") }
+        when (o.optString("command")) {
+            "create" -> "Saved to memory: $path"
+            "str_replace", "insert" -> "Updated memory: $path"
+            "delete" -> "Moved to memory recycle bin: $path"
+            "rename" -> "Renamed memory file: $path"
+            else -> null
+        }
+    } catch (_: Exception) { null }
 }

@@ -107,6 +107,10 @@ class OpenAiCompatLlm(
                 o.put("tool_call_id", m.toolCallId)
                 o.put("content", m.content ?: "")
             }
+            "user" -> if (m.images.isEmpty()) o.put("content", m.content ?: "") else o.put("content", JSONArray().also { arr ->
+                arr.put(JSONObject().put("type", "text").put("text", m.content ?: ""))
+                m.images.forEach { url -> arr.put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url))) }
+            })
             else -> o.put("content", m.content ?: "")
         }
         return o
