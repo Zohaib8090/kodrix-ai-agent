@@ -109,6 +109,7 @@ fun ChatScreen(
             ModalDrawerSheet(Modifier.width(300.dp)) {
                 Spacer(Modifier.height(24.dp))
                 Text("Kodrix AI", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.titleLarge)
+                Text("Chat home · build ${com.example.BuildConfig.GIT_SHA}", Modifier.padding(horizontal = 24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 val pad = NavigationDrawerItemDefaults.ItemPadding
                 NavigationDrawerItem(icon = { Icon(Icons.Default.Add, null) }, label = { Text("New chat") }, selected = false,

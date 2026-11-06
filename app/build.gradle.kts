@@ -22,6 +22,11 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+fun gitSha(): String = try {
+    val p = ProcessBuilder("git", "rev-parse", "--short", "HEAD").directory(rootDir).redirectErrorStream(true).start()
+    p.inputStream.bufferedReader().readText().trim().ifEmpty { "dev" }
+} catch (e: Exception) { "dev" }
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -32,6 +37,8 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
+    // Short git hash shown in the side menu, so it is obvious which build is installed.
+    buildConfigField("String", "GIT_SHA", "\"${gitSha()}\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
