@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -24,6 +27,12 @@ fun AgentSettingsScreen(onNavigateBack: () -> Unit) {
     val config = remember { AgentConfig(context) }
     var servers by remember { mutableStateOf(config.mcpServers) }
     var strong by remember { mutableStateOf(config.strongModel) }
+    var chat by remember { mutableStateOf(config.chatModel) }
+    // Models your primary provider already fetched (Settings > AI and Models > Fetch Models).
+    val fetchedModels = remember {
+        (context.applicationContext as com.example.MyApplication).aiProviderRepository.getUsableProviders()
+            .sortedByDescending { it.isPrimary }.firstOrNull()?.availableModels.orEmpty()
+    }
     var lang by remember { mutableStateOf(config.voiceLanguage) }
     var speak by remember { mutableStateOf(config.speakReplies) }
     var bypass by remember { mutableStateOf(config.bypassPermissions) }
@@ -63,6 +72,27 @@ fun AgentSettingsScreen(onNavigateBack: () -> Unit) {
                 }
             }
             item { Text("Models", style = MaterialTheme.typography.titleMedium) }
+            item {
+                OutlinedTextField(
+                    value = chat, onValueChange = { chat = it; config.chatModel = it },
+                    label = { Text("Chat model") },
+                    supportingText = { Text("Used for everyday chat and the power button. Blank = your provider's default, which may be a coding model.") },
+                    modifier = Modifier.fillMaxWidth().testTag("chat_model"), singleLine = true,
+                )
+            }
+            if (fetchedModels.isNotEmpty()) {
+                item {
+                    var showList by remember { mutableStateOf(false) }
+                    TextButton(onClick = { showList = !showList }) { Text(if (showList) "Hide fetched models" else "Pick from ${fetchedModels.size} fetched models") }
+                    if (showList) {
+                        Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                            fetchedModels.forEach { m ->
+                                Text(m, Modifier.fillMaxWidth().clickable { chat = m; config.chatModel = m; showList = false }.padding(vertical = 10.dp), style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            }
             item {
                 OutlinedTextField(
                     value = strong, onValueChange = { strong = it; config.strongModel = it },

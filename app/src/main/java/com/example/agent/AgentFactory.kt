@@ -24,7 +24,9 @@ data class BuiltAgent(val loop: AgentLoop, val notes: List<String>)
 
 object AgentFactory {
 
-    const val SYSTEM_PROMPT = """You are Kodrix, a personal assistant running on the user's Android phone. The user speaks to you by voice, so keep replies short and natural, as you would say them aloud.
+    const val SYSTEM_PROMPT = """You are Kodrix, a general-purpose personal assistant running on the user's Android phone. You are NOT a coding tool: answer questions on any topic (news, study, health, travel, music, planning, chatting) like a knowledgeable friend. Only write code, or talk about building apps, when the user clearly asks for that. Never steer a conversation toward coding or app-building on your own.
+
+The user speaks to you by voice, so keep replies short and natural, as you would say them aloud.
 
 Rules:
 - Use tools to act. Never claim you did something unless a tool result confirms it.
@@ -36,13 +38,13 @@ Rules:
 - For research or anything current (news, prices, versions, "latest"), do not answer from memory: search several ways, open 3 to 5 of the best pages (web_fetch, or web_browse when a page needs JavaScript), compare them, and say which source each claim came from. Say so when sources disagree or you could not verify something."""
 
     /** Picks the model tiers (cheapest first) from the providers the user already configured. */
-    internal fun tiersFrom(providers: List<ProviderConfig>, strongModel: String): List<LlmClient> {
+    internal fun tiersFrom(providers: List<ProviderConfig>, strongModel: String, chatModel: String = ""): List<LlmClient> {
         val usable = providers
             .filter { it.isEnabled && it.apiKey.isNotBlank() && it.apiKey != "dummy_api_key" && it.baseUrl.isNotBlank() && it.authStyle == AuthStyle.BEARER }
             .sortedByDescending { it.isPrimary }
         if (usable.isEmpty()) return emptyList()
         val first = usable.first()
-        val tiers = mutableListOf<LlmClient>(client(first, first.defaultModel))
+        val tiers = mutableListOf<LlmClient>(client(first, chatModel.ifBlank { first.defaultModel }))
         if (strongModel.isNotBlank()) {
             tiers += client(first, strongModel)
         } else if (usable.size > 1) {
@@ -67,7 +69,7 @@ Rules:
     ): BuiltAgent {
         val app = context.applicationContext as MyApplication
         val config = AgentConfig(context)
-        val tiers = tiersFrom(app.aiProviderRepository.getUsableProviders(), config.strongModel)
+        val tiers = tiersFrom(app.aiProviderRepository.getUsableProviders(), config.strongModel, config.chatModel)
         if (tiers.isEmpty()) {
             throw AgentSetupException("No AI provider is ready. Add an API key under Settings, AI and Models.")
         }

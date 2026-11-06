@@ -10,6 +10,11 @@ data class McpServerConfig(val name: String, val url: String, val bearerToken: S
 class AgentConfig(context: Context) {
     private val prefs = context.getSharedPreferences("kodrix_agent", Context.MODE_PRIVATE)
 
+    /** Model for everyday chat. Blank = the provider's default (which may be tuned for building apps). */
+    var chatModel: String
+        get() = prefs.getString("chat_model", "") ?: ""
+        set(v) = prefs.edit().putString("chat_model", v.trim()).apply()
+
     /** Optional stronger model (same provider/key as the first usable provider) used when the cheap one struggles. */
     var strongModel: String
         get() = prefs.getString("strong_model", "") ?: ""
